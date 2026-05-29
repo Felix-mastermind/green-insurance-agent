@@ -16,8 +16,10 @@ from app.payment_reminders import run_payment_reminders
 from app.renewal_reminders import run_renewal_reminders
 from app.ghl_client import (
     GHLIntegrationError,
+    get_conversations,
     get_contacts,
     get_opportunities,
+    get_pipelines,
     get_users,
     verify_location,
 )
@@ -157,3 +159,47 @@ async def contacts_health_check():
         "count": len(contacts),
         "sample_contact": contacts[0] if contacts else None
     }
+
+async def ghl_collection_health(label: str, loader):
+    try:
+        records = await loader()
+    except GHLIntegrationError as e:
+        print(
+            f"[GHL {label} Health] Error | "
+            f"endpoint={e.endpoint} | "
+            f"status_code={e.ghl_status or e.status_code} | "
+            f"response_body={e.ghl_response}"
+        )
+        return JSONResponse(
+            status_code=e.status_code,
+            content={
+                "status": "error",
+                "ghl_status": e.ghl_status or e.status_code,
+                "ghl_response": e.ghl_response,
+                "endpoint": e.endpoint,
+            },
+        )
+    except Exception as e:
+        print(f"[GHL {label} Health] Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected GHL {label.lower()} health check error")
+
+    return {
+        "count": len(records),
+        "sample": records[0] if records else None
+    }
+
+@app.get("/health/users")
+async def users_health_check():
+    return await ghl_collection_health("Users", get_users)
+
+@app.get("/health/pipelines")
+async def pipelines_health_check():
+    return await ghl_collection_health("Pipelines", get_pipelines)
+
+@app.get("/health/opportunities")
+async def opportunities_health_check():
+    return await ghl_collection_health("Opportunities", get_opportunities)
+
+@app.get("/health/conversations")
+async def conversations_health_check():
+    return await ghl_collection_health("Conversations", get_conversations)

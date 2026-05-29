@@ -91,6 +91,14 @@ def extract_items(data: dict, key: str) -> list:
     return value if isinstance(value, list) else []
 
 
+def get_conversation_cursor(conversation: dict) -> str | None:
+    for key in ("lastMessageDate", "lastMessageAt", "dateUpdated", "updatedAt", "dateAdded", "createdAt"):
+        value = conversation.get(key)
+        if value:
+            return value
+    return None
+
+
 async def paginate_by_skip(path: str, key: str, params: dict, limit: int = DEFAULT_LIMIT) -> list:
     items = []
     skip = 0
@@ -141,6 +149,33 @@ async def paginate_contacts(params: dict, limit: int = DEFAULT_LIMIT) -> list:
     return items
 
 
+async def paginate_conversations(params: dict, limit: int = DEFAULT_LIMIT) -> list:
+    items = []
+    cursor_params = {}
+
+    while True:
+        page_params = {**params, **cursor_params, "limit": limit}
+        data = await request_ghl("GET", "/conversations/search", params=page_params)
+        batch = extract_items(data, "conversations")
+        items.extend(batch)
+
+        meta = data.get("meta") or {}
+        total = meta.get("total")
+        start_after_date = meta.get("startAfterDate")
+        if not start_after_date and batch:
+            start_after_date = get_conversation_cursor(batch[-1])
+
+        if len(batch) < limit or (isinstance(total, int) and len(items) >= total):
+            break
+        if not start_after_date:
+            break
+
+        cursor_params = {"startAfterDate": start_after_date}
+
+    logger.info("[GHL] Fetched %s conversations", len(items))
+    return items
+
+
 async def paginate_by_page(path: str, key: str, params: dict, limit: int = DEFAULT_LIMIT) -> list:
     items = []
     page = 1
@@ -180,9 +215,17 @@ async def get_opportunities() -> list:
     return await paginate_by_page("/opportunities/search", "opportunities", {"location_id": location_id})
 
 
+async def get_pipelines() -> list:
+    _, location_id = get_ghl_config()
+    data = await request_ghl("GET", "/opportunities/pipelines", params={"locationId": location_id})
+    pipelines = extract_items(data, "pipelines")
+    logger.info("[GHL] Fetched %s pipelines", len(pipelines))
+    return pipelines
+
+
 async def get_conversations() -> list:
     _, location_id = get_ghl_config()
-    return await paginate_by_skip("/conversations/search", "conversations", {"locationId": location_id})
+    return await paginate_conversations({"locationId": location_id})
 
 
 async def get_users() -> list:
