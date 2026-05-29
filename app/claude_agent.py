@@ -5,7 +5,16 @@ import os
 import anthropic
 from app.supabase_client import get_conversation_history, save_conversation_message
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+_client = None
+
+def get_client():
+    global _client
+    if _client is None:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+        _client = anthropic.Anthropic(api_key=api_key)
+    return _client
 
 SYSTEM_PROMPT_ES = """Eres el asistente virtual de Green Insurance, una agencia de seguros en Georgia, USA.
 Tu nombre es "Asistente Green".
@@ -61,7 +70,7 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     should_transfer = any(kw in user_message.lower() for kw in transfer_keywords)
 
     try:
-        response = client.messages.create(
+        response = get_client().messages.create(
             model="claude-haiku-20240307",  # Fast + cheap for lead responses
             max_tokens=300,
             system=SYSTEM_PROMPT_ES,
