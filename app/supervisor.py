@@ -146,12 +146,8 @@ def opportunity_stage_id(opportunity: dict) -> str:
 
 
 def opportunity_pipeline_id(opportunity: dict) -> str:
-    pipeline = field(opportunity, "pipeline", "pipelineData", "pipeline_data", default={})
-    if isinstance(pipeline, dict):
-        return clean_id(field(pipeline, "id", "_id", "uid", "pipelineId", "pipelineUid", default=""))
-    if isinstance(pipeline, str):
-        return clean_id(pipeline)
-    return clean_id(field(
+    # First try top-level pipelineId fields (most reliable from GHL API)
+    top_level = clean_id(field(
         opportunity,
         "pipelineId",
         "pipelineUid",
@@ -160,6 +156,19 @@ def opportunity_pipeline_id(opportunity: dict) -> str:
         "pipelineID",
         default="",
     ))
+    if top_level:
+        return top_level
+
+    # Fallback: check nested pipeline object
+    pipeline = field(opportunity, "pipeline", "pipelineData", "pipeline_data", default={})
+    if isinstance(pipeline, dict) and pipeline:
+        nested = clean_id(field(pipeline, "id", "_id", "uid", "pipelineId", "pipelineUid", default=""))
+        if nested:
+            return nested
+    if isinstance(pipeline, str):
+        return clean_id(pipeline)
+
+    return ""
 
 
 def stage_items(pipeline: dict) -> list:
