@@ -4,6 +4,7 @@ Main FastAPI application with scheduled jobs
 """
 from fastapi import FastAPI
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
@@ -101,8 +102,21 @@ async def ghl_health_check():
         opportunities = await get_opportunities()
         users = await get_users()
     except GHLIntegrationError as e:
-        print(f"[GHL Health] Error: {e}")
-        raise HTTPException(status_code=e.status_code, detail=str(e))
+        print(
+            "[GHL Health] Error | "
+            f"endpoint={e.endpoint} | "
+            f"status_code={e.ghl_status or e.status_code} | "
+            f"response_body={e.ghl_response}"
+        )
+        return JSONResponse(
+            status_code=e.status_code,
+            content={
+                "status": "error",
+                "ghl_status": e.ghl_status or e.status_code,
+                "ghl_response": e.ghl_response,
+                "endpoint": e.endpoint,
+            },
+        )
     except Exception as e:
         print(f"[GHL Health] Unexpected error: {e}")
         raise HTTPException(status_code=500, detail="Unexpected GHL health check error")

@@ -14,9 +14,19 @@ logger = logging.getLogger(__name__)
 class GHLIntegrationError(Exception):
     """Raised when the GoHighLevel API cannot be reached or authenticated."""
 
-    def __init__(self, message: str, status_code: int = 502):
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 502,
+        endpoint: str = "",
+        ghl_status: int | None = None,
+        ghl_response: str = "",
+    ):
         super().__init__(message)
         self.status_code = status_code
+        self.endpoint = endpoint
+        self.ghl_status = ghl_status
+        self.ghl_response = ghl_response or message
 
 
 def get_ghl_config() -> tuple[str, str]:
@@ -48,19 +58,26 @@ async def request_ghl(method: str, path: str, **kwargs) -> dict:
             response = await client.request(method, url, headers=get_headers(), **kwargs)
     except httpx.HTTPError as exc:
         logger.exception("[GHL] Request failed: %s %s", method, path)
-        raise GHLIntegrationError(f"GHL request failed: {exc}") from exc
-
-    if response.status_code in (401, 403):
-        logger.error("[GHL] Authentication failed for %s %s: %s", method, path, response.text)
-        raise GHLIntegrationError("GHL token is invalid or missing required scopes", status_code=401)
-
-    if response.status_code == 404:
-        logger.error("[GHL] Resource not found for %s %s: %s", method, path, response.text)
-        raise GHLIntegrationError("GHL location or resource was not found", status_code=404)
+        raise GHLIntegrationError(
+            f"GHL request failed: {exc}",
+            endpoint=path,
+            ghl_response=str(exc),
+        ) from exc
 
     if response.status_code >= 400:
-        logger.error("[GHL] API error %s for %s %s: %s", response.status_code, method, path, response.text)
-        raise GHLIntegrationError("GHL API returned an error", status_code=response.status_code)
+        logger.error(
+            "[GHL] API error | endpoint=%s | status_code=%s | response_body=%s",
+            path,
+            response.status_code,
+            response.text,
+        )
+        raise GHLIntegrationError(
+            response.text,
+            status_code=response.status_code,
+            endpoint=path,
+            ghl_status=response.status_code,
+            ghl_response=response.text,
+        )
 
     try:
         return response.json()
