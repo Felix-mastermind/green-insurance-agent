@@ -35,6 +35,17 @@ CALLBACK_KEYWORDS = ("call me", "callback", "call back", "llamame", "llámame", 
 APPOINTMENT_KEYWORDS = ("appointment", "appt", "cita", "agendada", "booked", "scheduled")
 QUOTED_STAGE_KEYWORDS = ("quote", "quoted", "cotizacion", "cotización", "proposal", "estimate")
 CLOSED_STATUSES = {"lost", "won", "closed"}
+INFO_KEYWORDS = ("info", "information", "informacion", "details", "detalle")
+ILLUSTRATION_KEYWORDS = ("illustration", "ilustracion", "proposal", "quote")
+ENROLLMENT_KEYWORDS = ("enroll", "enrollment", "inscribir", "inscripcion", "application", "apply")
+BENEFITS_KEYWORDS = ("benefit", "benefits", "coverage", "cobertura", "deductible", "copay")
+PRICING_KEYWORDS = ("price", "pricing", "cost", "premium", "precio", "costo", "cuanto")
+INTERVIEW_KEYWORDS = ("interview", "entrevista")
+JOB_DETAILS_KEYWORDS = ("job", "position", "details", "trabajo", "puesto", "vacante")
+AVAILABILITY_KEYWORDS = ("available", "availability", "disponible", "disponibilidad", "schedule")
+OVERLOADED_ASSIGNED_THRESHOLD = 60
+OVERLOADED_UNANSWERED_THRESHOLD = 20
+OVERLOADED_RESPONSE_THRESHOLD = 30
 
 
 async def load_supervisor_data() -> dict:
@@ -274,6 +285,30 @@ def has_keyword(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
+def pipeline_category(pipeline_name: str) -> str:
+    name = pipeline_name.lower()
+    if "auto" in name:
+        return "AUTO"
+    if "life" in name or "vida" in name:
+        return "LIFE"
+    if "health" in name or "dental" in name or "salud" in name:
+        return "HEALTH_DENTAL"
+    if "recruit" in name or "hiring" in name or "reclut" in name:
+        return "RECRUITING"
+    return "GENERAL"
+
+
+def normalize_pipeline_filter(pipeline: str | None) -> str | None:
+    return pipeline.strip().lower() if pipeline else None
+
+
+def pipeline_matches(lead: dict, pipeline: str | None) -> bool:
+    normalized = normalize_pipeline_filter(pipeline)
+    if not normalized:
+        return True
+    return normalized in str(lead.get("pipeline_name", "")).lower()
+
+
 def waiting_minutes_for_dates(last_inbound: datetime | None, last_outbound: datetime | None) -> int:
     if not last_inbound:
         return 0
@@ -286,29 +321,53 @@ def hot_lead_score(opportunity: dict, conversations: list, pipelines: list) -> d
     score = 0
     factors = {}
     text = conversation_text(conversations)
+    pipeline_name = opportunity_pipeline_name(opportunity, pipelines)
+    category = pipeline_category(pipeline_name)
     stage_name = opportunity_stage_name(opportunity, pipelines).lower()
     status = str(field(opportunity, "status", default="")).lower()
     last_inbound = latest_message_date(conversations, "inbound")
     last_outbound = latest_message_date(conversations, "outbound")
     waiting_minutes = waiting_minutes_for_dates(last_inbound, last_outbound)
 
-    recent_inbound = bool(last_inbound and (datetime.now(timezone.utc) - last_inbound.astimezone(timezone.utc)) <= timedelta(days=2))
-    requested_quote = has_keyword(text, QUOTE_KEYWORDS)
-    sent_license = has_keyword(text, LICENSE_KEYWORDS)
-    sent_vin = has_keyword(text, VIN_KEYWORDS)
-    requested_callback = has_keyword(text, CALLBACK_KEYWORDS)
-    appointment_booked = has_keyword(text, APPOINTMENT_KEYWORDS) or "appointment" in stage_name or "cita" in stage_name
-    quoted_not_closed = any(keyword in stage_name for keyword in QUOTED_STAGE_KEYWORDS) and status not in CLOSED_STATUSES
+    recent_response = bool(last_inbound and (datetime.now(timezone.utc) - last_inbound.astimezone(timezone.utc)) <= timedelta(days=2))
+    factor_scores = {}
 
-    factor_scores = {
-        "recent_inbound_message": (recent_inbound, 20),
-        "requested_quote": (requested_quote, 20),
-        "sent_license": (sent_license, 15),
-        "sent_vin": (sent_vin, 15),
-        "requested_callback": (requested_callback, 15),
-        "appointment_booked": (appointment_booked, 20),
-        "quoted_but_not_closed": (quoted_not_closed, 25),
-    }
+    if category == "AUTO":
+        factor_scores = {
+            "requested_quote": (has_keyword(text, QUOTE_KEYWORDS), 25),
+            "sent_driver_license": (has_keyword(text, LICENSE_KEYWORDS), 25),
+            "sent_vin": (has_keyword(text, VIN_KEYWORDS), 25),
+            "recent_response": (recent_response, 25),
+        }
+    elif category == "LIFE":
+        factor_scores = {
+            "requested_information": (has_keyword(text, INFO_KEYWORDS), 25),
+            "booked_appointment": (has_keyword(text, APPOINTMENT_KEYWORDS) or "appointment" in stage_name or "cita" in stage_name, 25),
+            "requested_illustration": (has_keyword(text, ILLUSTRATION_KEYWORDS), 25),
+            "recent_response": (recent_response, 25),
+        }
+    elif category == "HEALTH_DENTAL":
+        factor_scores = {
+            "requested_enrollment": (has_keyword(text, ENROLLMENT_KEYWORDS), 25),
+            "requested_benefits": (has_keyword(text, BENEFITS_KEYWORDS), 25),
+            "requested_pricing": (has_keyword(text, PRICING_KEYWORDS), 25),
+            "recent_response": (recent_response, 25),
+        }
+    elif category == "RECRUITING":
+        factor_scores = {
+            "responded_to_interview": (has_keyword(text, INTERVIEW_KEYWORDS), 35),
+            "requested_job_details": (has_keyword(text, JOB_DETAILS_KEYWORDS), 35),
+            "confirmed_availability": (has_keyword(text, AVAILABILITY_KEYWORDS), 30),
+        }
+    else:
+        quoted_not_closed = any(keyword in stage_name for keyword in QUOTED_STAGE_KEYWORDS) and status not in CLOSED_STATUSES
+        factor_scores = {
+            "recent_response": (recent_response, 25),
+            "requested_quote": (has_keyword(text, QUOTE_KEYWORDS), 25),
+            "requested_callback": (has_keyword(text, CALLBACK_KEYWORDS), 20),
+            "appointment_booked": (has_keyword(text, APPOINTMENT_KEYWORDS) or "appointment" in stage_name or "cita" in stage_name, 20),
+            "quoted_but_not_closed": (quoted_not_closed, 25),
+        }
 
     for name, (matched, points) in factor_scores.items():
         factors[name] = matched
@@ -323,6 +382,7 @@ def hot_lead_score(opportunity: dict, conversations: list, pipelines: list) -> d
 
     return {
         "score": min(score, 100),
+        "pipeline_category": category,
         "factors": factors,
         "waiting_minutes": waiting_minutes,
         "last_inbound_message_date": last_inbound.isoformat() if last_inbound else None,
@@ -352,18 +412,24 @@ def compact_lead(
         "id": field(record, "id", "_id", "opportunityId", "conversationId", default=""),
         "contact_id": contact_id(record),
         "name": contact_name(record),
+        "contact_name": contact_name(record),
         "pipeline_name": pipeline_name,
         "stage_name": stage_name,
+        "assigned_agent": users_by_id.get(assignee, {"id": assignee, "name": "Unassigned", "email": ""}) if assignee else {"id": "", "name": "Unassigned", "email": ""},
         "assigned_user": users_by_id.get(assignee, {"id": assignee, "name": "Unassigned", "email": ""}) if assignee else {"id": "", "name": "Unassigned", "email": ""},
         "last_inbound_message_date": last_inbound.isoformat() if last_inbound else None,
         "last_outbound_message_date": last_outbound.isoformat() if last_outbound else None,
         "waiting_time_minutes": waiting_minutes,
         "hot_lead_score": score_info.get("score", 0),
         "score_factors": score_info.get("factors", {}),
+        "pipeline_category": score_info.get("pipeline_category", pipeline_category(pipeline_name)),
         "status": field(record, "status", default=""),
         "monetary_value": field(record, "monetaryValue", "value", default=0),
+        "opportunity_value": field(record, "monetaryValue", "value", default=0),
         "created_at": field(record, "createdAt", "dateAdded", default=""),
         "updated_at": field(record, "updatedAt", "dateUpdated", default=""),
+        "created_date": field(record, "createdAt", "dateAdded", default=""),
+        "updated_date": field(record, "updatedAt", "dateUpdated", default=""),
     }
     if pipelines is not None:
         item["stage"] = stage_name
@@ -379,7 +445,42 @@ def build_conversation_index(conversations: list) -> dict:
     return index
 
 
-def hot_leads(data: dict) -> list:
+def all_leads(data: dict, pipeline: str | None = None) -> list:
+    conversations_by_contact = build_conversation_index(data["conversations"])
+    leads = []
+
+    for opportunity in data["opportunities"]:
+        related_conversations = conversations_by_contact.get(contact_id(opportunity), [])
+        score = hot_lead_score(opportunity, related_conversations, data["pipelines"])
+        lead = compact_lead(opportunity, data["pipelines"], data["users"], related_conversations, score)
+        if pipeline_matches(lead, pipeline):
+            leads.append(lead)
+
+    return leads
+
+
+def filtered_data(data: dict, pipeline: str | None = None) -> dict:
+    if not normalize_pipeline_filter(pipeline):
+        return data
+
+    leads = all_leads(data, pipeline)
+    opportunity_ids = {str(lead["id"]) for lead in leads}
+    contact_ids = {str(lead["contact_id"]) for lead in leads if lead.get("contact_id")}
+
+    return {
+        **data,
+        "opportunities": [
+            opportunity for opportunity in data["opportunities"]
+            if str(field(opportunity, "id", "_id", "opportunityId", default="")) in opportunity_ids
+        ],
+        "conversations": [
+            conversation for conversation in data["conversations"]
+            if contact_id(conversation) in contact_ids
+        ],
+    }
+
+
+def hot_leads(data: dict, pipeline: str | None = None) -> list:
     conversations_by_contact = build_conversation_index(data["conversations"])
     hot = []
 
@@ -392,36 +493,30 @@ def hot_leads(data: dict) -> list:
         score = hot_lead_score(opportunity, related_conversations, data["pipelines"])
         if score["score"] >= 70:
             item = compact_lead(opportunity, data["pipelines"], data["users"], related_conversations, score)
-            hot.append(item)
+            if pipeline_matches(item, pipeline):
+                hot.append(item)
 
     return sorted(hot, key=lambda item: item["hot_lead_score"], reverse=True)
 
 
-def unattended_leads(data: dict) -> list:
+def unattended_leads(data: dict, pipeline: str | None = None) -> list:
     leads = []
     conversations_by_contact = build_conversation_index(data["conversations"])
     for opportunity in data["opportunities"]:
         status = str(field(opportunity, "status", default="")).lower()
         if status not in CLOSED_STATUSES and not assigned_user_id(opportunity):
             related_conversations = conversations_by_contact.get(contact_id(opportunity), [])
-            leads.append(compact_lead(opportunity, data["pipelines"], data["users"], related_conversations))
+            lead = compact_lead(opportunity, data["pipelines"], data["users"], related_conversations)
+            if pipeline_matches(lead, pipeline):
+                leads.append(lead)
     return leads
 
 
-def waiting_leads(data: dict) -> list:
-    now = datetime.now(timezone.utc)
-    waiting = []
-    for conversation in data["conversations"]:
-        last_at = last_message_at(conversation)
-        if not last_at or not is_inbound_waiting(conversation):
-            continue
-        age = now - last_at.astimezone(timezone.utc)
-        if age > WAITING_THRESHOLD:
-            item = compact_lead(conversation, users=data["users"], conversations=[conversation])
-            item["waiting_minutes"] = int(age.total_seconds() // 60)
-            item["last_message_at"] = last_at.isoformat()
-            waiting.append(item)
-    return waiting
+def waiting_leads(data: dict, pipeline: str | None = None) -> list:
+    return [
+        lead for lead in all_leads(data, pipeline)
+        if lead["waiting_time_minutes"] >= int(WAITING_THRESHOLD.total_seconds() // 60)
+    ]
 
 
 def agent_workload(data: dict) -> list:
@@ -474,10 +569,45 @@ def average_response_time_by_agent(data: dict) -> list:
     return sorted(results, key=lambda item: item["average_response_minutes"])
 
 
-def leads_by_stage(data: dict) -> list:
+def average_response_map(data: dict) -> dict:
+    return {
+        item["agent_id"]: item["average_response_minutes"]
+        for item in average_response_time_by_agent(data)
+    }
+
+
+def supervisor_workload(data: dict, pipeline: str | None = None) -> dict:
+    response_times = average_response_map(filtered_data(data, pipeline))
+    workload = {}
+
+    for lead in all_leads(data, pipeline):
+        agent = lead["assigned_agent"]
+        agent_id = agent.get("id") or "unassigned"
+        agent_name = agent.get("name") or "Unassigned"
+        workload.setdefault(agent_name, {
+            "assigned": 0,
+            "unanswered": 0,
+            "avg_response_minutes": response_times.get(agent_id, 0),
+            "overloaded": False,
+        })
+        workload[agent_name]["assigned"] += 1
+        if lead["waiting_time_minutes"] >= int(WAITING_THRESHOLD.total_seconds() // 60):
+            workload[agent_name]["unanswered"] += 1
+
+    for metrics in workload.values():
+        metrics["overloaded"] = (
+            metrics["assigned"] >= OVERLOADED_ASSIGNED_THRESHOLD
+            or metrics["unanswered"] >= OVERLOADED_UNANSWERED_THRESHOLD
+            or metrics["avg_response_minutes"] >= OVERLOADED_RESPONSE_THRESHOLD
+        )
+
+    return dict(sorted(workload.items(), key=lambda item: item[1]["assigned"], reverse=True))
+
+
+def leads_by_stage(data: dict, pipeline: str | None = None) -> list:
     stages = {}
-    for opportunity in data["opportunities"]:
-        stage = opportunity_stage_name(opportunity, data["pipelines"])
+    for lead in all_leads(data, pipeline):
+        stage = lead["stage_name"]
         stages[stage] = stages.get(stage, 0) + 1
     return [{"stage": stage, "count": count} for stage, count in sorted(stages.items())]
 
@@ -490,7 +620,7 @@ def custom_field_value(record: dict, field_ids: set[str]) -> Any:
     return None
 
 
-def renewals_due_soon(data: dict) -> list:
+def renewals_due_soon(data: dict, pipeline: str | None = None) -> list:
     now = datetime.now(timezone.utc)
     due = []
     conversations_by_contact = build_conversation_index(data["conversations"])
@@ -507,27 +637,106 @@ def renewals_due_soon(data: dict) -> list:
             item = compact_lead(opportunity, data["pipelines"], data["users"], related_conversations)
             item["renewal_date"] = renewal_date.date().isoformat()
             item["days_until_renewal"] = days_until
-            due.append(item)
+            if pipeline_matches(item, pipeline):
+                due.append(item)
     return sorted(due, key=lambda item: item["days_until_renewal"])
 
 
-def build_supervisor_report(data: dict) -> dict:
-    workload = agent_workload(data)
-    response_times = average_response_time_by_agent(data)
+def pipeline_summary(data: dict) -> dict:
+    summaries = {}
+    hot = hot_leads(data)
+    waiting = waiting_leads(data)
+
+    for lead in all_leads(data):
+        name = lead["pipeline_name"]
+        summaries.setdefault(name, {"name": name, "opportunities": 0, "hot_leads": 0, "unanswered": 0})
+        summaries[name]["opportunities"] += 1
+
+    for lead in hot:
+        summaries.setdefault(lead["pipeline_name"], {"name": lead["pipeline_name"], "opportunities": 0, "hot_leads": 0, "unanswered": 0})
+        summaries[lead["pipeline_name"]]["hot_leads"] += 1
+
+    for lead in waiting:
+        summaries.setdefault(lead["pipeline_name"], {"name": lead["pipeline_name"], "opportunities": 0, "hot_leads": 0, "unanswered": 0})
+        summaries[lead["pipeline_name"]]["unanswered"] += 1
+
+    return {"pipelines": sorted(summaries.values(), key=lambda item: item["opportunities"], reverse=True)}
+
+
+def supervisor_actions(data: dict, pipeline: str | None = None) -> dict:
+    actions = []
+
+    for lead in waiting_leads(data, pipeline):
+        actions.append({
+            "priority": 100 + lead["waiting_time_minutes"],
+            "action": f"Call {lead['contact_name']} (waiting {lead['waiting_time_minutes']} min)",
+            "lead": lead,
+        })
+
+    for lead in hot_leads(data, pipeline):
+        if lead["hot_lead_score"] >= 70:
+            actions.append({
+                "priority": 80 + lead["hot_lead_score"],
+                "action": f"Follow up {lead['contact_name']} (hot lead score {lead['hot_lead_score']})",
+                "lead": lead,
+            })
+
+    for lead in renewals_due_soon(data, pipeline):
+        actions.append({
+            "priority": 70 + max(0, 30 - lead["days_until_renewal"]),
+            "action": f"Renewal reminder for {lead['contact_name']} (expires in {lead['days_until_renewal']} days)",
+            "lead": lead,
+        })
+
+    actions = sorted(actions, key=lambda item: item["priority"], reverse=True)
+    return {"actions": [item["action"] for item in actions], "details": actions}
+
+
+def manager_context(data: dict, pipeline: str | None = None) -> dict:
+    selected_leads = all_leads(data, pipeline)
+    selected_hot = hot_leads(data, pipeline)
+    selected_waiting = waiting_leads(data, pipeline)
+    selected_renewals = renewals_due_soon(data, pipeline)
+    return {
+        "pipeline_filter": pipeline,
+        "questions_supported": [
+            "How is AUTO performing?",
+            "Which agents are overloaded?",
+            "Which leads need immediate attention?",
+            "How many renewals are due this week?",
+        ],
+        "metrics": {
+            "opportunities": len(selected_leads),
+            "hot_leads": len(selected_hot),
+            "unanswered": len(selected_waiting),
+            "renewals_due_soon": len(selected_renewals),
+            "renewals_due_this_week": len([lead for lead in selected_renewals if lead["days_until_renewal"] <= 7]),
+        },
+    }
+
+
+def build_supervisor_report(data: dict, pipeline: str | None = None) -> dict:
+    scoped_data = filtered_data(data, pipeline)
+    workload = agent_workload(scoped_data)
+    response_times = average_response_time_by_agent(scoped_data)
     return {
         "counts": {
-            "users": len(data["users"]),
-            "opportunities": len(data["opportunities"]),
-            "conversations": len(data["conversations"]),
-            "pipelines": len(data["pipelines"]),
+            "users": len(scoped_data["users"]),
+            "opportunities": len(all_leads(data, pipeline)),
+            "conversations": len(scoped_data["conversations"]),
+            "pipelines": len(scoped_data["pipelines"]),
         },
-        "hot_leads": hot_leads(data),
-        "unattended_leads": unattended_leads(data),
-        "leads_waiting_more_than_15_minutes": waiting_leads(data),
+        "pipeline_filter": pipeline,
+        "hot_leads": hot_leads(data, pipeline),
+        "unattended_leads": unattended_leads(data, pipeline),
+        "leads_waiting_more_than_15_minutes": waiting_leads(data, pipeline),
         "agent_workload": workload,
+        "workload": supervisor_workload(data, pipeline),
         "average_response_time_per_agent": response_times,
-        "leads_by_stage": leads_by_stage(data),
-        "renewals_due_soon": renewals_due_soon(data),
+        "leads_by_stage": leads_by_stage(data, pipeline),
+        "renewals_due_soon": renewals_due_soon(data, pipeline),
+        "pipelines": pipeline_summary(data)["pipelines"],
+        "manager_context": manager_context(data, pipeline),
     }
 
 
@@ -557,35 +766,50 @@ async def supervisor_response(builder: Callable[[dict], Any]):
 
 
 @router.get("/summary")
-async def summary():
-    return await supervisor_response(build_supervisor_report)
+async def summary(pipeline: str | None = None):
+    return await supervisor_response(lambda data: build_supervisor_report(data, pipeline))
 
 
 @router.get("/hot-leads")
-async def supervisor_hot_leads():
-    return await supervisor_response(lambda data: {"hot_leads": hot_leads(data)})
+async def supervisor_hot_leads(pipeline: str | None = None):
+    return await supervisor_response(lambda data: {"hot_leads": hot_leads(data, pipeline)})
 
 
 @router.get("/agent-performance")
-async def supervisor_agent_performance():
+async def supervisor_agent_performance(pipeline: str | None = None):
     return await supervisor_response(
         lambda data: {
-            "agent_workload": agent_workload(data),
-            "average_response_time_per_agent": average_response_time_by_agent(data),
+            "agent_workload": agent_workload(filtered_data(data, pipeline)),
+            "average_response_time_per_agent": average_response_time_by_agent(filtered_data(data, pipeline)),
         }
     )
 
 
 @router.get("/unanswered")
-async def supervisor_unanswered():
+async def supervisor_unanswered(pipeline: str | None = None):
     return await supervisor_response(
         lambda data: {
-            "unattended_leads": unattended_leads(data),
-            "leads_waiting_more_than_15_minutes": waiting_leads(data),
+            "unattended_leads": unattended_leads(data, pipeline),
+            "leads_waiting_more_than_15_minutes": waiting_leads(data, pipeline),
         }
     )
 
 
 @router.get("/renewals")
-async def supervisor_renewals():
-    return await supervisor_response(lambda data: {"renewals_due_soon": renewals_due_soon(data)})
+async def supervisor_renewals(pipeline: str | None = None):
+    return await supervisor_response(lambda data: {"renewals_due_soon": renewals_due_soon(data, pipeline)})
+
+
+@router.get("/pipelines")
+async def supervisor_pipelines():
+    return await supervisor_response(pipeline_summary)
+
+
+@router.get("/workload")
+async def supervisor_workload_endpoint(pipeline: str | None = None):
+    return await supervisor_response(lambda data: supervisor_workload(data, pipeline))
+
+
+@router.get("/actions")
+async def supervisor_actions_endpoint(pipeline: str | None = None):
+    return await supervisor_response(lambda data: supervisor_actions(data, pipeline))
