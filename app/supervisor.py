@@ -115,18 +115,45 @@ def assigned_user_id(record: dict) -> str:
     return str(value or "")
 
 
+def record_id(record: dict) -> str:
+    return str(field(record, "id", "_id", "opportunityId", "uid", default=""))
+
+
 def opportunity_stage_id(opportunity: dict) -> str:
     stage = field(opportunity, "stage", default={})
     if isinstance(stage, dict):
-        return str(field(stage, "id", "_id", "stageId", default=""))
-    return str(field(opportunity, "pipelineStageId", "stageId", "pipeline_stage_id", default=""))
+        return str(field(stage, "id", "_id", "uid", "stageId", "pipelineStageId", "pipelineStageUid", default=""))
+    if isinstance(stage, str):
+        return stage
+    return str(field(
+        opportunity,
+        "pipelineStageId",
+        "pipelineStageUid",
+        "pipeline_stage_id",
+        "pipeline_stage_uid",
+        "stageId",
+        "stageUid",
+        "stage_id",
+        "stage_uid",
+        default="",
+    ))
 
 
 def opportunity_pipeline_id(opportunity: dict) -> str:
     pipeline = field(opportunity, "pipeline", default={})
     if isinstance(pipeline, dict):
-        return str(field(pipeline, "id", "_id", "pipelineId", default=""))
-    return str(field(opportunity, "pipelineId", "pipeline_id", default=""))
+        return str(field(pipeline, "id", "_id", "uid", "pipelineId", "pipelineUid", default=""))
+    if isinstance(pipeline, str):
+        return pipeline
+    return str(field(
+        opportunity,
+        "pipelineId",
+        "pipelineUid",
+        "pipeline_id",
+        "pipeline_uid",
+        "pipelineID",
+        default="",
+    ))
 
 
 def build_pipeline_indexes(pipelines: list) -> tuple[dict, dict]:
@@ -134,16 +161,29 @@ def build_pipeline_indexes(pipelines: list) -> tuple[dict, dict]:
     stages_by_id = {}
 
     for pipeline in pipelines:
-        pipeline_id = str(field(pipeline, "id", "_id", "pipelineId", default=""))
+        pipeline_id = str(field(pipeline, "id", "_id", "uid", "pipelineId", "pipelineUid", default=""))
         pipeline_name = str(field(pipeline, "name", "title", default=pipeline_id or "Unmapped Pipeline"))
-        if pipeline_id:
-            pipelines_by_id[pipeline_id] = pipeline_name
+        for candidate in {pipeline_id, str(field(pipeline, "id", default="")), str(field(pipeline, "_id", default="")), str(field(pipeline, "uid", default=""))}:
+            if candidate:
+                pipelines_by_id[candidate] = pipeline_name
 
         for stage in pipeline.get("stages", []) or []:
-            stage_id = str(field(stage, "id", "_id", "stageId", default=""))
-            if stage_id:
-                stages_by_id[stage_id] = {
-                    "stage_name": str(field(stage, "name", "title", default=stage_id)),
+            stage_id = str(field(stage, "id", "_id", "uid", "stageId", "pipelineStageId", "pipelineStageUid", default=""))
+            stage_name = str(field(stage, "name", "title", default=stage_id))
+            stage_candidates = {
+                stage_id,
+                str(field(stage, "id", default="")),
+                str(field(stage, "_id", default="")),
+                str(field(stage, "uid", default="")),
+                str(field(stage, "stageId", default="")),
+                str(field(stage, "pipelineStageId", default="")),
+                str(field(stage, "pipelineStageUid", default="")),
+            }
+            for candidate in stage_candidates:
+                if not candidate:
+                    continue
+                stages_by_id[candidate] = {
+                    "stage_name": stage_name,
                     "pipeline_id": pipeline_id,
                     "pipeline_name": pipeline_name,
                 }
@@ -409,7 +449,7 @@ def compact_lead(
     score_info = score_info or {"score": 0, "factors": {}}
 
     item = {
-        "id": field(record, "id", "_id", "opportunityId", "conversationId", default=""),
+        "id": field(record, "id", "_id", "opportunityId", "conversationId", "uid", default=""),
         "contact_id": contact_id(record),
         "name": contact_name(record),
         "contact_name": contact_name(record),
@@ -434,6 +474,17 @@ def compact_lead(
     if pipelines is not None:
         item["stage"] = stage_name
     return item
+
+
+def raw_opportunity_view(opportunity: dict) -> dict:
+    return {
+        "id": record_id(opportunity),
+        "pipelineId": opportunity_pipeline_id(opportunity),
+        "pipelineStageId": opportunity_stage_id(opportunity),
+        "assignedTo": assigned_user_id(opportunity),
+        "contactId": contact_id(opportunity),
+        "name": contact_name(opportunity),
+    }
 
 
 def build_conversation_index(conversations: list) -> dict:
@@ -471,7 +522,7 @@ def filtered_data(data: dict, pipeline: str | None = None) -> dict:
         **data,
         "opportunities": [
             opportunity for opportunity in data["opportunities"]
-            if str(field(opportunity, "id", "_id", "opportunityId", default="")) in opportunity_ids
+            if record_id(opportunity) in opportunity_ids
         ],
         "conversations": [
             conversation for conversation in data["conversations"]
@@ -813,3 +864,22 @@ async def supervisor_workload_endpoint(pipeline: str | None = None):
 @router.get("/actions")
 async def supervisor_actions_endpoint(pipeline: str | None = None):
     return await supervisor_response(lambda data: supervisor_actions(data, pipeline))
+
+
+@router.get("/raw-opportunity")
+async def supervisor_raw_opportunity():
+    return await supervisor_response(
+        lambda data: raw_opportunity_view(data["opportunities"][0]) if data["opportunities"] else {
+            "id": None,
+            "pipelineId": None,
+            "pipelineStageId": None,
+            "assignedTo": None,
+            "contactId": None,
+            "name": None,
+        }
+    )
+
+
+@router.get("/raw-pipelines")
+async def supervisor_raw_pipelines():
+    return await supervisor_response(lambda data: {"pipelines": data["pipelines"]})
