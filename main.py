@@ -3,6 +3,7 @@ Green Insurance CRM Agent
 Main FastAPI application with scheduled jobs
 """
 from fastapi import FastAPI
+from fastapi import HTTPException
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
@@ -12,6 +13,13 @@ from contextlib import asynccontextmanager
 from app.webhook_handler import router as webhook_router
 from app.payment_reminders import run_payment_reminders
 from app.renewal_reminders import run_renewal_reminders
+from app.ghl_client import (
+    GHLIntegrationError,
+    get_contacts,
+    get_opportunities,
+    get_users,
+    verify_location,
+)
 
 ET = pytz.timezone("America/New_York")
 scheduler = AsyncIOScheduler(timezone=ET)
@@ -83,3 +91,25 @@ async def trigger_renewal_reminders():
     """Manually trigger renewal reminders (for testing)"""
     result = await run_renewal_reminders()
     return result
+
+@app.get("/health/ghl")
+async def ghl_health_check():
+    """Verify GoHighLevel token and location access."""
+    try:
+        await verify_location()
+        contacts = await get_contacts()
+        opportunities = await get_opportunities()
+        users = await get_users()
+    except GHLIntegrationError as e:
+        print(f"[GHL Health] Error: {e}")
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    except Exception as e:
+        print(f"[GHL Health] Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail="Unexpected GHL health check error")
+
+    return {
+        "status": "connected",
+        "contacts": len(contacts),
+        "opportunities": len(opportunities),
+        "users": len(users)
+    }
