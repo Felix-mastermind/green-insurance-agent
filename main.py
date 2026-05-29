@@ -5,6 +5,7 @@ Main FastAPI application with scheduled jobs
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
@@ -28,10 +29,24 @@ from app.ghl_client import (
 ET = pytz.timezone("America/New_York")
 scheduler = AsyncIOScheduler(timezone=ET)
 
+def registered_routes() -> list:
+    routes = []
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            routes.append({
+                "path": route.path,
+                "name": route.name,
+                "methods": sorted(route.methods),
+            })
+    return sorted(routes, key=lambda item: item["path"])
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start scheduler on app startup"""
     print("[Agent] Green Insurance CRM Agent starting...")
+    print("[Agent] Registered routes:")
+    for route in registered_routes():
+        print(f"[Route] {','.join(route['methods'])} {route['path']} -> {route['name']}")
 
     # Payment reminders - daily at 9:00am ET
     scheduler.add_job(
@@ -131,6 +146,10 @@ async def ghl_health_check():
         "opportunities": len(opportunities),
         "users": len(users)
     }
+
+@app.get("/routes")
+async def routes():
+    return {"routes": registered_routes()}
 
 @app.get("/health/contacts")
 async def contacts_health_check():
