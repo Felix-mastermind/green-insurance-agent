@@ -12,6 +12,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from app.webhook_handler import router as webhook_router
+from app.supervisor import router as supervisor_router
 from app.payment_reminders import run_payment_reminders
 from app.renewal_reminders import run_renewal_reminders
 from app.ghl_client import (
@@ -68,6 +69,7 @@ app = FastAPI(
 
 # Include webhook routes
 app.include_router(webhook_router)
+app.include_router(supervisor_router)
 
 @app.get("/")
 async def root():
