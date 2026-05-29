@@ -112,6 +112,35 @@ async def paginate_by_skip(path: str, key: str, params: dict, limit: int = DEFAU
     return items
 
 
+async def paginate_contacts(params: dict, limit: int = DEFAULT_LIMIT) -> list:
+    items = []
+    cursor_params = {}
+
+    while True:
+        page_params = {**params, **cursor_params, "limit": limit}
+        data = await request_ghl("GET", "/contacts/", params=page_params)
+        batch = extract_items(data, "contacts")
+        items.extend(batch)
+
+        meta = data.get("meta") or {}
+        total = meta.get("total")
+        start_after = meta.get("startAfter")
+        start_after_id = meta.get("startAfterId")
+
+        if len(batch) < limit or (isinstance(total, int) and len(items) >= total):
+            break
+        if not start_after or not start_after_id:
+            break
+
+        cursor_params = {
+            "startAfter": start_after,
+            "startAfterId": start_after_id,
+        }
+
+    logger.info("[GHL] Fetched %s contacts", len(items))
+    return items
+
+
 async def paginate_by_page(path: str, key: str, params: dict, limit: int = DEFAULT_LIMIT) -> list:
     items = []
     page = 1
@@ -143,7 +172,7 @@ async def verify_location() -> dict:
 
 async def get_contacts() -> list:
     _, location_id = get_ghl_config()
-    return await paginate_by_skip("/contacts/", "contacts", {"locationId": location_id})
+    return await paginate_contacts({"locationId": location_id})
 
 
 async def get_opportunities() -> list:
@@ -166,9 +195,7 @@ async def get_users() -> list:
 async def get_contacts_by_tag(tag: str, limit: int = 100) -> list:
     """Get all contacts with a specific tag"""
     _, location_id = get_ghl_config()
-    return await paginate_by_skip(
-        "/contacts/",
-        "contacts",
+    return await paginate_contacts(
         {"locationId": location_id, "tags": tag},
         limit=limit,
     )

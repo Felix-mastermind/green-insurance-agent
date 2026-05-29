@@ -127,3 +127,33 @@ async def ghl_health_check():
         "opportunities": len(opportunities),
         "users": len(users)
     }
+
+@app.get("/health/contacts")
+async def contacts_health_check():
+    """Return the GoHighLevel contact count and a sample contact."""
+    try:
+        contacts = await get_contacts()
+    except GHLIntegrationError as e:
+        print(
+            "[GHL Contacts Health] Error | "
+            f"endpoint={e.endpoint} | "
+            f"status_code={e.ghl_status or e.status_code} | "
+            f"response_body={e.ghl_response}"
+        )
+        return JSONResponse(
+            status_code=e.status_code,
+            content={
+                "status": "error",
+                "ghl_status": e.ghl_status or e.status_code,
+                "ghl_response": e.ghl_response,
+                "endpoint": e.endpoint,
+            },
+        )
+    except Exception as e:
+        print(f"[GHL Contacts Health] Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail="Unexpected GHL contacts health check error")
+
+    return {
+        "count": len(contacts),
+        "sample_contact": contacts[0] if contacts else None
+    }
