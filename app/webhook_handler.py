@@ -68,7 +68,8 @@ def extract_message_body(payload: dict) -> str:
 
 def extract_contact_id(payload: dict) -> str:
     """Extract contact ID from various GHL payload formats"""
-    for key in ("contactId", "contact_id", "ContactId", "contact_Id"):
+    # GHL Workflow sends contact_id (underscore format)
+    for key in ("contact_id", "contactId", "ContactId", "contact_Id"):
         val = payload.get(key, "")
         if val and isinstance(val, str) and len(val) > 5:
             return str(val)
@@ -105,9 +106,12 @@ def extract_channel(payload: dict) -> str:
 
 def extract_contact_name(payload: dict) -> str:
     """Extract contact name from payload"""
-    # Top-level fields
-    first = payload.get("firstName", "") or payload.get("first_name", "")
-    last = payload.get("lastName", "") or payload.get("last_name", "")
+    # GHL Workflow uses underscore format: first_name, last_name, full_name
+    full = payload.get("full_name", "")
+    if full:
+        return full
+    first = payload.get("first_name", "") or payload.get("firstName", "")
+    last = payload.get("last_name", "") or payload.get("lastName", "")
     if first or last:
         return f"{first} {last}".strip()
     # Nested contact object
