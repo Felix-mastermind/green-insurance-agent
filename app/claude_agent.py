@@ -71,7 +71,7 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
 
     try:
         response = get_client().messages.create(
-            model="claude-haiku-20240307",  # Fast + cheap for lead responses
+            model="claude-3-haiku-20240307",  # Fast + cheap for lead responses
             max_tokens=300,
             system=SYSTEM_PROMPT_ES,
             messages=messages
