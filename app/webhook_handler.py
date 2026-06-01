@@ -47,6 +47,68 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
             await send_whatsapp(contact_id, transfer_msg)
         print(f"[Webhook] Transfer triggered for {contact_name}")
 
+def extract_message_body(payload: dict) -> str:
+    """Extract message text from various GHL payload formats"""
+    # Direct message field (string)
+    msg = payload.get("message", "")
+    if isinstance(msg, str) and msg.strip():
+        return msg.strip()
+    # Nested message object with body
+    if isinstance(msg, dict):
+        body = msg.get("body", "") or msg.get("text", "") or msg.get("content", "")
+        if body:
+            return str(body).strip()
+    # Other common fields
+    for key in ("body", "text", "content", "messageBody", "smsMessage"):
+        val = payload.get(key, "")
+        if val and isinstance(val, str):
+            return val.strip()
+    return ""
+
+
+def extract_contact_id(payload: dict) -> str:
+    """Extract contact ID from various GHL payload formats"""
+    for key in ("contactId", "contact_id", "id"):
+        val = payload.get(key, "")
+        if val:
+            return str(val)
+    contact = payload.get("contact", {})
+    if isinstance(contact, dict):
+        return contact.get("id", "") or contact.get("contactId", "")
+    return ""
+
+
+def extract_channel(payload: dict) -> str:
+    """Extract message channel from payload"""
+    for key in ("messageType", "channel", "type", "medium"):
+        val = payload.get(key, "")
+        if val and val.upper() in ("SMS", "WHATSAPP", "EMAIL"):
+            return val.upper()
+    msg = payload.get("message", {})
+    if isinstance(msg, dict):
+        t = msg.get("type", "") or msg.get("channel", "")
+        if t and t.upper() in ("SMS", "WHATSAPP", "EMAIL"):
+            return t.upper()
+    return "SMS"
+
+
+def extract_contact_name(payload: dict) -> str:
+    """Extract contact name from payload"""
+    # Top-level fields
+    first = payload.get("firstName", "") or payload.get("first_name", "")
+    last = payload.get("lastName", "") or payload.get("last_name", "")
+    if first or last:
+        return f"{first} {last}".strip()
+    # Nested contact object
+    contact = payload.get("contact", {})
+    if isinstance(contact, dict):
+        first = contact.get("firstName", "") or contact.get("first_name", "")
+        last = contact.get("lastName", "") or contact.get("last_name", "")
+        name = contact.get("name", "") or contact.get("fullName", "")
+        return (f"{first} {last}".strip()) or name
+    return ""
+
+
 @router.post("/webhook/ghl")
 async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
     """Main GHL webhook endpoint"""
@@ -54,35 +116,42 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
         payload = await request.json()
         event_type = payload.get("type", "")
 
-        print(f"[Webhook] Event received: {event_type}")
+        # Log full payload for debugging (first 500 chars)
+        import json
+        print(f"[Webhook] Event: {event_type or 'NO_TYPE'} | Payload: {json.dumps(payload)[:500]}")
 
-        # Inbound message from contact
-        if event_type == "InboundMessage":
-            contact_id = payload.get("contactId", "")
-            message = payload.get("message", "")
-            channel = payload.get("messageType", "SMS")
-            contact_name = f"{payload.get('firstName', '')} {payload.get('lastName', '')}".strip()
+        # Detect inbound message — GHL Workflows may omit 'type' or use different names
+        inbound_events = {"InboundMessage", "CustomerReplied", "customer_replied", "inbound_message", ""}
+        is_inbound = (
+            event_type in inbound_events
+            and payload.get("direction", "inbound").lower() != "outbound"
+        )
 
-            if contact_id and message:
-                background_tasks.add_task(
-                    process_inbound_message,
-                    contact_id, message, channel, contact_name
-                )
+        # If no type, treat as inbound if it has a message body
+        message_body = extract_message_body(payload)
+        contact_id = extract_contact_id(payload)
+
+        if is_inbound and contact_id and message_body:
+            channel = extract_channel(payload)
+            contact_name = extract_contact_name(payload)
+            print(f"[Webhook] Inbound {channel} from {contact_name or contact_id}: {message_body[:80]}")
+            background_tasks.add_task(
+                process_inbound_message,
+                contact_id, message_body, channel, contact_name
+            )
 
         # New contact/lead created
-        elif event_type == "ContactCreate":
-            contact_id = payload.get("id", "")
+        elif event_type in ("ContactCreate", "ContactCreated", "contact_created"):
             first_name = payload.get("firstName", "")
-            print(f"[Webhook] New contact created: {first_name} ({contact_id})")
+            print(f"[Webhook] New contact: {first_name} ({contact_id})")
 
         # Opportunity stage changed
-        elif event_type == "OpportunityStageUpdate":
-            opp_id = payload.get("id", "")
-            stage = payload.get("stage", {}).get("name", "")
-            contact_id = payload.get("contactId", "")
-            print(f"[Webhook] Stage updated for {contact_id}: {stage}")
+        elif event_type in ("OpportunityStageUpdate", "opportunity_stage_update"):
+            stage = payload.get("stage", {})
+            stage_name = stage.get("name", "") if isinstance(stage, dict) else str(stage)
+            print(f"[Webhook] Stage updated for {contact_id}: {stage_name}")
 
-        return {"status": "ok", "event": event_type}
+        return {"status": "ok", "event": event_type or "inbound_message"}
 
     except Exception as e:
         print(f"[Webhook] Error: {e}")
