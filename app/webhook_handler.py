@@ -4,7 +4,7 @@ Receives events from GHL and processes them
 """
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note
 from app.supabase_client import log_message, save_conversation_message
 
 router = APIRouter()
@@ -45,9 +45,15 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
             await send_sms(contact_id, transfer_msg)
         else:
             await send_whatsapp(contact_id, transfer_msg)
-        # Tag contact so agents see it needs attention
+        # Add internal note so agent sees it immediately when opening the chat
+        intent_label = ai_result.get("intent", "general")
+        await add_internal_note(
+            contact_id,
+            f"Este cliente solicito hablar con un asesor. Interes: {intent_label}. "
+            f"Ultimo mensaje: \"{user_message[:100]}\". Por favor dar seguimiento."
+        )
         await add_contact_tag(contact_id, "necesita-asesor")
-        print(f"[Webhook] Transfer triggered for {contact_name} — tag 'necesita-asesor' added")
+        print(f"[Webhook] Transfer triggered for {contact_name} — internal note added")
 
 def extract_message_body(payload: dict) -> str:
     """Extract message text from various GHL payload formats"""

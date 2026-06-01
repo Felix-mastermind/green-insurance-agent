@@ -248,6 +248,43 @@ async def get_contact(contact_id: str) -> Optional[dict]:
     data = await request_ghl("GET", f"/contacts/{contact_id}")
     return data.get("contact")
 
+async def get_contact_conversation_id(contact_id: str) -> str:
+    """Get the main conversation ID for a contact"""
+    _, location_id = get_ghl_config()
+    try:
+        data = await request_ghl(
+            "GET",
+            "/conversations/search",
+            params={"locationId": location_id, "contactId": contact_id, "limit": 1}
+        )
+        convs = extract_items(data, "conversations")
+        if convs:
+            return convs[0].get("id", "")
+    except Exception as e:
+        logger.error("[GHL] Error getting conversation for %s: %s", contact_id, e)
+    return ""
+
+async def add_internal_note(contact_id: str, note: str) -> dict:
+    """Add an internal note to a contact's conversation (visible only to agents)"""
+    try:
+        conv_id = await get_contact_conversation_id(contact_id)
+        if not conv_id:
+            logger.error("[GHL] No conversation found for contact %s", contact_id)
+            return {}
+        return await request_ghl(
+            "POST",
+            "/conversations/messages",
+            json={
+                "type": "Activity",
+                "conversationId": conv_id,
+                "html": f"<p>🤖 <strong>Agente IA:</strong> {note}</p>",
+                "body": f"🤖 Agente IA: {note}",
+            }
+        )
+    except Exception as e:
+        logger.error("[GHL] Error adding internal note to %s: %s", contact_id, e)
+        return {}
+
 async def add_contact_tag(contact_id: str, tag: str) -> dict:
     """Add a tag to a contact in GHL"""
     try:
