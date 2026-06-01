@@ -426,32 +426,69 @@ async def get_conversation_messages(conversation_id: str, limit: int = 10) -> li
             return msgs if isinstance(msgs, list) else []
     return []
 
-async def human_agent_active(contact_id: str) -> bool:
+def is_business_hours() -> bool:
+    """Returns True if current time is within business hours: 11am-7pm ET Mon-Sun"""
+    import pytz
+    from datetime import datetime
+    ET = pytz.timezone("America/New_York")
+    now = datetime.now(ET)
+    return 11 <= now.hour < 19  # 11:00am to 6:59pm ET
+
+async def human_agent_active(contact_id: str, takeover_minutes: int = 5) -> bool:
     """
-    Returns True if a human agent sent a message in this conversation recently.
-    Human messages have a userId; bot/API messages don't.
+    Returns True if a human agent responded recently and bot should stay silent.
+
+    Logic:
+    - Outside business hours (before 11am or after 7pm ET): always False (bot responds)
+    - During business hours: True only if human responded within the last `takeover_minutes`
     """
     try:
+        # Outside business hours — bot always responds
+        if not is_business_hours():
+            logger.info("[GHL] Outside business hours — bot responds for %s", contact_id)
+            return False
+
         conversations = await get_contact_conversations(contact_id)
         if not conversations:
             return False
         conv_id = conversations[0].get("id", "")
         if not conv_id:
             return False
-        messages = await get_conversation_messages(conv_id, limit=15)
-        # Walk messages newest-first looking for outbound messages
+        messages = await get_conversation_messages(conv_id, limit=20)
+
+        from datetime import datetime, timezone, timedelta
+        import dateutil.parser
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=takeover_minutes)
+
         for msg in messages:
             direction = msg.get("direction", "") or msg.get("messageType", "")
             is_outbound = direction in ("outbound", "TYPE_OUTGOING", "outgoing")
             if not is_outbound:
                 continue
             user_id = msg.get("userId", "") or msg.get("user_id", "")
-            if user_id:
-                # Has a real userId = sent by a human agent in GHL UI
-                logger.info("[GHL] Human agent active for %s (userId=%s)", contact_id, user_id)
-                return True
-            # No userId = sent by our API bot — keep checking older messages
-        return False
+            if not user_id:
+                continue  # Bot message — skip
+            # Human message found — check how recent it is
+            date_str = msg.get("dateAdded", "") or msg.get("createdAt", "") or msg.get("date", "")
+            if date_str:
+                try:
+                    msg_time = dateutil.parser.parse(date_str)
+                    if msg_time.tzinfo is None:
+                        msg_time = msg_time.replace(tzinfo=timezone.utc)
+                    if msg_time >= cutoff:
+                        logger.info("[GHL] Human agent responded %s ago — bot silent for %s",
+                                    datetime.now(timezone.utc) - msg_time, contact_id)
+                        return True  # Human responded within 5 min — stay silent
+                    else:
+                        logger.info("[GHL] Human last responded >%dmin ago — bot takes over %s",
+                                    takeover_minutes, contact_id)
+                        return False  # Human responded but too long ago — bot retakes
+                except Exception:
+                    return True  # Can't parse date — be safe, stay silent
+            else:
+                return True  # No date info — assume recent, stay silent
+
+        return False  # No human messages found — bot responds
     except Exception as e:
         logger.error("[GHL] Error checking human agent for %s: %s", contact_id, e)
         return False  # On error, let bot respond
