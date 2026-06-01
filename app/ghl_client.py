@@ -248,6 +248,18 @@ async def get_contact(contact_id: str) -> Optional[dict]:
     data = await request_ghl("GET", f"/contacts/{contact_id}")
     return data.get("contact")
 
+async def add_contact_tag(contact_id: str, tag: str) -> dict:
+    """Add a tag to a contact in GHL"""
+    try:
+        return await request_ghl(
+            "POST",
+            f"/contacts/{contact_id}/tags",
+            json={"tags": [tag]}
+        )
+    except Exception as e:
+        logger.error("[GHL] Error adding tag %s to %s: %s", tag, contact_id, e)
+        return {}
+
 async def send_sms(contact_id: str, message: str) -> dict:
     """Send SMS to a contact"""
     return await request_ghl(
