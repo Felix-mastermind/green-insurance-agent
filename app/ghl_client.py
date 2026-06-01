@@ -296,3 +296,54 @@ async def search_contacts(query: str) -> list:
         params={"locationId": location_id, "query": query, "limit": 5}
     )
     return extract_items(data, "contacts")
+
+async def get_contact_conversations(contact_id: str) -> list:
+    """Get conversations for a contact"""
+    _, location_id = get_ghl_config()
+    data = await request_ghl(
+        "GET",
+        "/conversations/search",
+        params={"locationId": location_id, "contactId": contact_id, "limit": 5}
+    )
+    return extract_items(data, "conversations")
+
+async def get_conversation_messages(conversation_id: str, limit: int = 10) -> list:
+    """Get messages from a conversation"""
+    data = await request_ghl(
+        "GET",
+        f"/conversations/{conversation_id}/messages",
+        params={"limit": limit}
+    )
+    # Messages can be under different keys
+    for key in ("messages", "data", "items"):
+        msgs = data.get(key, [])
+        if msgs:
+            return msgs if isinstance(msgs, list) else []
+    return []
+
+async def get_latest_inbound_message(contact_id: str) -> dict | None:
+    """Get the most recent inbound message from a contact"""
+    try:
+        conversations = await get_contact_conversations(contact_id)
+        if not conversations:
+            return None
+        # Use most recent conversation
+        conv = conversations[0]
+        conv_id = conv.get("id", "")
+        if not conv_id:
+            return None
+        messages = await get_conversation_messages(conv_id, limit=20)
+        # Find most recent inbound message
+        for msg in messages:
+            direction = msg.get("direction", "") or msg.get("messageType", "")
+            if direction in ("inbound", "TYPE_INCOMING", "incoming"):
+                return {
+                    "body": msg.get("body", "") or msg.get("text", "") or msg.get("message", ""),
+                    "type": msg.get("type", "SMS"),
+                    "conversationId": conv_id,
+                    "messageId": msg.get("id", ""),
+                }
+        return None
+    except Exception as e:
+        logger.error("[GHL] Error fetching latest message for %s: %s", contact_id, e)
+        return None

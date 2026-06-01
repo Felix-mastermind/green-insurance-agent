@@ -4,7 +4,7 @@ Receives events from GHL and processes them
 """
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
-from app.ghl_client import send_sms, send_whatsapp, get_contact
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message
 from app.supabase_client import log_message, save_conversation_message
 
 router = APIRouter()
@@ -131,14 +131,28 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
         message_body = extract_message_body(payload)
         contact_id = extract_contact_id(payload)
 
-        if is_inbound and contact_id and message_body:
+        if is_inbound and contact_id:
             channel = extract_channel(payload)
             contact_name = extract_contact_name(payload)
-            print(f"[Webhook] Inbound {channel} from {contact_name or contact_id}: {message_body[:80]}")
-            background_tasks.add_task(
-                process_inbound_message,
-                contact_id, message_body, channel, contact_name
-            )
+
+            # If message body not in payload, fetch from GHL API
+            if not message_body:
+                print(f"[Webhook] No message body in payload for {contact_id} — fetching from GHL API")
+                latest = await get_latest_inbound_message(contact_id)
+                if latest:
+                    message_body = latest.get("body", "")
+                    if latest.get("type"):
+                        channel = latest["type"].upper() if latest["type"].upper() in ("SMS","WHATSAPP","EMAIL") else channel
+                    print(f"[Webhook] Fetched message from GHL: {message_body[:80]}")
+
+            if message_body:
+                print(f"[Webhook] Processing {channel} from {contact_name or contact_id}: {message_body[:80]}")
+                background_tasks.add_task(
+                    process_inbound_message,
+                    contact_id, message_body, channel, contact_name
+                )
+            else:
+                print(f"[Webhook] No message found for contact {contact_id} — skipping")
 
         # New contact/lead created
         elif event_type in ("ContactCreate", "ContactCreated", "contact_created"):
