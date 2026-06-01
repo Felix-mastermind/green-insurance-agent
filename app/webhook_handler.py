@@ -158,22 +158,43 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
         contact_id = extract_contact_id(payload)
 
         if is_inbound and contact_id:
-            channel = extract_channel(payload)
             contact_name = extract_contact_name(payload)
+
+            # STOP bot if human agent already took over (check tags in payload)
+            contact_tags = payload.get("tags", "")
+            if isinstance(contact_tags, str):
+                tag_list = [t.strip().lower() for t in contact_tags.split(",")]
+            elif isinstance(contact_tags, list):
+                tag_list = [str(t).strip().lower() for t in contact_tags]
+            else:
+                tag_list = []
+
+            human_active_tags = {"necesita-asesor", "asesor-activo", "human-active", "bot-paused"}
+            if any(t in human_active_tags for t in tag_list):
+                print(f"[Webhook] SKIPPED — human agent handling {contact_name} ({contact_id})")
+                return {"status": "ok", "event": "skipped_human_active"}
+
+            # Detect channel from GHL message type integer
+            msg_obj = payload.get("message", {})
+            msg_type_int = msg_obj.get("type", 0) if isinstance(msg_obj, dict) else 0
+            # GHL message type: 1=SMS, 3=Email, 7=WhatsApp, 19=WhatsApp (older)
+            if msg_type_int in (1,):
+                channel = "SMS"
+            elif msg_type_int in (3, 7, 10, 19):
+                channel = "WhatsApp"
+            else:
+                channel = extract_channel(payload)
 
             # If message body not in payload, fetch from GHL API
             if not message_body:
-                print(f"[Webhook] No message body in payload for {contact_id} — fetching from GHL API")
+                print(f"[Webhook] No message body for {contact_id} — fetching from GHL API")
                 latest = await get_latest_inbound_message(contact_id)
                 if latest:
                     message_body = latest.get("body", "")
-                    if latest.get("type"):
-                        channel = latest["type"].upper() if latest["type"].upper() in ("SMS","WHATSAPP","EMAIL") else channel
-                    print(f"[Webhook] Fetched message from GHL: {message_body[:80]}")
+                    print(f"[Webhook] Fetched message: {message_body[:80]}")
 
             if message_body:
                 print(f"[Webhook] Processing {channel} from {contact_name or contact_id}: {message_body[:80]}")
-                # Get assigned user ID from payload (GHL sends user.id as the contact owner)
                 user_obj = payload.get("user", {})
                 assigned_uid = user_obj.get("id", "") if isinstance(user_obj, dict) else ""
                 background_tasks.add_task(
@@ -181,7 +202,7 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
                     contact_id, message_body, channel, contact_name, assigned_uid
                 )
             else:
-                print(f"[Webhook] No message found for contact {contact_id} — skipping")
+                print(f"[Webhook] No message found for {contact_id} — skipping")
 
         # New contact/lead created
         elif event_type in ("ContactCreate", "ContactCreated", "contact_created"):
