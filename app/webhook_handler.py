@@ -68,28 +68,39 @@ def extract_message_body(payload: dict) -> str:
 
 def extract_contact_id(payload: dict) -> str:
     """Extract contact ID from various GHL payload formats"""
-    for key in ("contactId", "contact_id", "id"):
+    for key in ("contactId", "contact_id", "ContactId", "contact_Id"):
         val = payload.get(key, "")
-        if val:
+        if val and isinstance(val, str) and len(val) > 5:
             return str(val)
+    # Try nested contact object
     contact = payload.get("contact", {})
     if isinstance(contact, dict):
-        return contact.get("id", "") or contact.get("contactId", "")
+        val = contact.get("id", "") or contact.get("contactId", "")
+        if val:
+            return str(val)
+    # GHL sometimes sends 'id' at top level for contact webhooks
+    val = payload.get("id", "")
+    if val and isinstance(val, str) and len(val) > 10:
+        return str(val)
     return ""
 
 
 def extract_channel(payload: dict) -> str:
     """Extract message channel from payload"""
-    for key in ("messageType", "channel", "type", "medium"):
+    for key in ("messageType", "channel", "medium"):
         val = payload.get(key, "")
-        if val and val.upper() in ("SMS", "WHATSAPP", "EMAIL"):
+        if val and isinstance(val, str) and val.upper() in ("SMS", "WHATSAPP", "EMAIL"):
             return val.upper()
+    # 'type' field may be int in GHL payloads — skip if not string
+    val = payload.get("type", "")
+    if val and isinstance(val, str) and val.upper() in ("SMS", "WHATSAPP", "EMAIL"):
+        return val.upper()
     msg = payload.get("message", {})
     if isinstance(msg, dict):
         t = msg.get("type", "") or msg.get("channel", "")
-        if t and t.upper() in ("SMS", "WHATSAPP", "EMAIL"):
+        if t and isinstance(t, str) and t.upper() in ("SMS", "WHATSAPP", "EMAIL"):
             return t.upper()
-    return "SMS"
+    return "WhatsApp"  # default to WhatsApp since that's the main channel
 
 
 def extract_contact_name(payload: dict) -> str:
@@ -174,3 +185,23 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
 @router.get("/webhook/health")
 async def health_check():
     return {"status": "online", "agent": "Green Insurance CRM Agent v1.0"}
+
+# Temporary debug endpoint — stores last webhook payload
+_last_payload = {}
+
+@router.post("/webhook/debug")
+async def ghl_webhook_debug(request: Request):
+    """Debug endpoint — returns the raw payload GHL sends"""
+    global _last_payload
+    try:
+        _last_payload = await request.json()
+    except Exception:
+        _last_payload = {"error": "could not parse JSON", "raw": await request.body()}
+    import json
+    print(f"[DEBUG] Full payload: {json.dumps(_last_payload)}")
+    return {"status": "ok", "received": _last_payload}
+
+@router.get("/webhook/last-payload")
+async def get_last_payload():
+    """See the last payload received for debugging"""
+    return _last_payload
