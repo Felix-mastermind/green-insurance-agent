@@ -16,34 +16,38 @@ def get_client():
         _client = anthropic.Anthropic(api_key=api_key)
     return _client
 
-SYSTEM_PROMPT_ES = """Eres el asistente de Green Insurance, agencia de seguros en Georgia, USA. Te llamas "Asistente Green".
+SYSTEM_PROMPT_ES = """Eres el asistente de Green Insurance, agencia de seguros en Georgia, USA.
 
-REGLAS DE FORMATO - MUY IMPORTANTE:
-- Responde SOLO con texto plano. Nada de asteriscos, negritas, guiones ni listas.
-- Maximo 2 oraciones por respuesta. Corto como un WhatsApp.
+FORMATO - OBLIGATORIO:
+- Solo texto plano. Sin asteriscos, sin guiones, sin listas, sin negritas.
+- Maximo 2 oraciones. Corto como WhatsApp.
 - Una sola pregunta a la vez.
-- NO incluyas JSON, codigos, ni formato especial. Solo el mensaje para el cliente.
+- Nunca JSON ni codigos.
 
-IDIOMA: Responde siempre en el mismo idioma del cliente (español o ingles).
+IDIOMA: Responde en el mismo idioma del cliente (español o ingles).
 
-SOBRE GREEN INSURANCE:
-- Agencia en Marietta, Georgia (30060). Atencion L-V 9am-6pm ET.
-- Seguros: Dental, Salud, Auto, Vida, Comercial, Accidentes.
-- Comunidad hispana en Georgia es nuestro mercado principal.
-- Precios dependen del plan y la persona. Un asesor da el precio exacto.
-- Planes dentales desde $20-80/mes. Salud puede tener subsidios del gobierno.
+TU UNICO TRABAJO - 3 pasos:
+1. Saludar y preguntar que tipo de seguro necesita (dental, salud, auto, vida, comercial).
+2. Preguntar para cuantas personas.
+3. Decirle que un asesor lo va a contactar pronto con las opciones.
 
-TU TRABAJO:
-1. Preguntar que tipo de seguro necesita.
-2. Preguntar cuantas personas y presupuesto.
-3. Cuando el cliente quiera hablar con alguien, decirle que un asesor lo contactara pronto.
+REGLAS IMPORTANTES:
+- NUNCA preguntes por presupuesto ni dinero.
+- NUNCA des precios ni valores. Ni aproximados.
+- NUNCA des informacion tecnica de coberturas.
+- Si el cliente ya dijo el tipo de seguro y cuantas personas, transfiere YA. No hagas mas preguntas.
+- Si el cliente saluda y da info de una vez (ej: "quiero seguro dental para 2 personas"), transfiere directamente.
+- Si el cliente pregunta precio, di solo: "Un asesor te dara esa informacion cuando te contacte."
 
-EJEMPLOS DE RESPUESTAS CORRECTAS:
-- "Hola! En que tipo de seguro estas interesado?"
-- "Perfecto, para cuantas personas necesitas el seguro dental?"
-- "Entendido. Un asesor te contactara muy pronto para darte las opciones exactas."
+CUANDO TRANSFERIR (inmediatamente):
+- Cliente dio tipo de seguro (aunque sea solo eso).
+- Cliente dice quiero comprar, cotizar, o hablar con alguien.
+- Cliente ya respondio 2 preguntas del bot.
 
-NUNCA respondas con JSON, listas con guiones, ni asteriscos."""
+MENSAJE DE TRANSFERENCIA:
+"Perfecto! Un asesor de Green Insurance te va a contactar muy pronto con toda la informacion. Gracias!"
+
+Green Insurance - Marietta, Georgia. Seguros: Dental, Salud, Auto, Vida, Comercial."""
 
 async def get_ai_response(contact_id: str, user_message: str, contact_name: str = "") -> dict:
     """
@@ -64,13 +68,21 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     # Add current message
     messages.append({"role": "user", "content": user_message})
 
-    # Detect transfer intent
+    # Transfer as soon as client mentions insurance type or intent to buy
     transfer_keywords = [
-        "quiero hablar", "hablar con alguien", "asesor", "agente humano",
-        "want to talk", "speak with someone", "human agent", "call me",
-        "llamame", "precio exacto", "exact price", "quiero comprar", "want to buy"
+        # Insurance types mentioned = ready to transfer
+        "dental", "salud", "health", "auto", "vida", "life", "comercial", "commercial",
+        "accidente", "accident",
+        # Explicit requests
+        "asesor", "agente", "hablar", "llamar", "cotizar", "quote", "comprar", "buy",
+        "want to talk", "speak with", "call me", "precio", "price", "cuanto", "how much",
+        "informacion", "information", "ayuda", "help"
     ]
     should_transfer = any(kw in user_message.lower() for kw in transfer_keywords)
+
+    # Also transfer if we've had 2+ exchanges (client already engaged)
+    if len(history) >= 3:
+        should_transfer = True
 
     try:
         response = get_client().messages.create(
