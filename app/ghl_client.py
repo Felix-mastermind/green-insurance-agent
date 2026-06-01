@@ -285,6 +285,24 @@ async def add_internal_note(contact_id: str, note: str) -> dict:
         logger.error("[GHL] Error adding internal note to %s: %s", contact_id, e)
         return {}
 
+async def create_task(contact_id: str, title: str, assigned_to: str = "", due_hours: int = 2) -> dict:
+    """Create a task in GHL assigned to an agent"""
+    from datetime import datetime, timezone, timedelta
+    due_date = (datetime.now(timezone.utc) + timedelta(hours=due_hours)).isoformat()
+    body = {
+        "title": title,
+        "contactId": contact_id,
+        "dueDate": due_date,
+        "completed": False,
+    }
+    if assigned_to:
+        body["assignedTo"] = assigned_to
+    try:
+        return await request_ghl("POST", f"/contacts/{contact_id}/tasks", json=body)
+    except Exception as e:
+        logger.error("[GHL] Error creating task for %s: %s", contact_id, e)
+        return {}
+
 async def add_contact_tag(contact_id: str, tag: str) -> dict:
     """Add a tag to a contact in GHL"""
     try:

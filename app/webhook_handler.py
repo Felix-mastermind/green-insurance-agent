@@ -4,7 +4,7 @@ Receives events from GHL and processes them
 """
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task
 from app.supabase_client import log_message, save_conversation_message
 
 router = APIRouter()
@@ -18,7 +18,7 @@ AGENTS = {
     "Sharon Jones":    "axXwrCLjvTuDMBSiMoPa",
 }
 
-async def process_inbound_message(contact_id: str, message: str, channel: str, contact_name: str):
+async def process_inbound_message(contact_id: str, message: str, channel: str, contact_name: str, assigned_user_id: str = ""):
     """Process incoming message from a lead"""
     print(f"[Webhook] Inbound {channel} from {contact_name} ({contact_id}): {message[:50]}...")
 
@@ -45,15 +45,16 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
             await send_sms(contact_id, transfer_msg)
         else:
             await send_whatsapp(contact_id, transfer_msg)
-        # Add internal note so agent sees it immediately when opening the chat
+        # Create a Task so agent sees it in their GHL task list
         intent_label = ai_result.get("intent", "general")
-        await add_internal_note(
+        await create_task(
             contact_id,
-            f"Este cliente solicito hablar con un asesor. Interes: {intent_label}. "
-            f"Ultimo mensaje: \"{user_message[:100]}\". Por favor dar seguimiento."
+            title=f"Lead listo — {contact_name} | {intent_label} | '{user_message[:60]}'",
+            assigned_to=assigned_user_id,
+            due_hours=1
         )
         await add_contact_tag(contact_id, "necesita-asesor")
-        print(f"[Webhook] Transfer triggered for {contact_name} — internal note added")
+        print(f"[Webhook] Transfer triggered for {contact_name} — task created")
 
 def extract_message_body(payload: dict) -> str:
     """Extract message text from various GHL payload formats"""
@@ -170,9 +171,12 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
 
             if message_body:
                 print(f"[Webhook] Processing {channel} from {contact_name or contact_id}: {message_body[:80]}")
+                # Get assigned user ID from payload (GHL sends user.id as the contact owner)
+                user_obj = payload.get("user", {})
+                assigned_uid = user_obj.get("id", "") if isinstance(user_obj, dict) else ""
                 background_tasks.add_task(
                     process_inbound_message,
-                    contact_id, message_body, channel, contact_name
+                    contact_id, message_body, channel, contact_name, assigned_uid
                 )
             else:
                 print(f"[Webhook] No message found for contact {contact_id} — skipping")
