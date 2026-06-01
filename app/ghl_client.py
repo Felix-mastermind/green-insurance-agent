@@ -339,6 +339,44 @@ async def send_whatsapp(contact_id: str, message: str) -> dict:
         }
     )
 
+# HOT Leads stage IDs per pipeline
+HOT_LEADS_STAGES = {
+    "HzCwe9SCtirKXGFdFLVT": "32534212-1d9f-460b-90cc-f1eb40e3e04d",  # Dental
+    "BdzkOH5twVi9sCK2ag96": "e53564ac-4518-4b5d-9a51-daaaf4eb10e2",  # AUTO - Mastermind
+    "XrTzKSNz9VpYuSvVZzyH": "cbc91e6d-7750-4788-ba1b-8d1fd30cba3a",  # Life
+}
+
+async def get_contact_opportunities(contact_id: str) -> list:
+    """Get opportunities for a contact"""
+    _, location_id = get_ghl_config()
+    try:
+        data = await request_ghl(
+            "GET",
+            "/opportunities/search",
+            params={"location_id": location_id, "contact_id": contact_id, "limit": 5}
+        )
+        return extract_items(data, "opportunities")
+    except Exception as e:
+        logger.error("[GHL] Error getting opportunities for %s: %s", contact_id, e)
+        return []
+
+async def move_to_hot_lead(contact_id: str) -> bool:
+    """Move contact's opportunity to HOT Leads stage based on their pipeline"""
+    opportunities = await get_contact_opportunities(contact_id)
+    if not opportunities:
+        logger.warning("[GHL] No opportunities found for contact %s", contact_id)
+        return False
+    moved = False
+    for opp in opportunities:
+        pipeline_id = opp.get("pipelineId", "")
+        hot_stage_id = HOT_LEADS_STAGES.get(pipeline_id)
+        if hot_stage_id:
+            opp_id = opp.get("id", "")
+            await update_contact_stage(opp_id, hot_stage_id)
+            logger.info("[GHL] Moved opportunity %s to HOT Leads (pipeline %s)", opp_id, pipeline_id)
+            moved = True
+    return moved
+
 async def update_contact_stage(opportunity_id: str, stage_id: str) -> dict:
     """Update opportunity stage"""
     return await request_ghl(

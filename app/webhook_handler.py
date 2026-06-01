@@ -4,7 +4,7 @@ Receives events from GHL and processes them
 """
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead
 from app.supabase_client import log_message, save_conversation_message
 
 router = APIRouter()
@@ -45,16 +45,18 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
             await send_sms(contact_id, transfer_msg)
         else:
             await send_whatsapp(contact_id, transfer_msg)
-        # Create a Task so agent sees it in their GHL task list
         intent_label = ai_result.get("intent", "general")
+        # Move opportunity to HOT Leads stage in GHL pipeline
+        moved = await move_to_hot_lead(contact_id)
+        # Create task for the assigned agent
         await create_task(
             contact_id,
-            title=f"Lead listo — {contact_name} | {intent_label} | '{user_message[:60]}'",
+            title=f"HOT Lead — {contact_name} | {intent_label} | '{user_message[:60]}'",
             assigned_to=assigned_user_id,
             due_hours=1
         )
         await add_contact_tag(contact_id, "necesita-asesor")
-        print(f"[Webhook] Transfer triggered for {contact_name} — task created")
+        print(f"[Webhook] Transfer for {contact_name} — moved to HOT Leads: {moved}")
 
 def extract_message_body(payload: dict) -> str:
     """Extract message text from various GHL payload formats"""
