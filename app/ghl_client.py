@@ -426,6 +426,36 @@ async def get_conversation_messages(conversation_id: str, limit: int = 10) -> li
             return msgs if isinstance(msgs, list) else []
     return []
 
+async def human_agent_active(contact_id: str) -> bool:
+    """
+    Returns True if a human agent sent a message in this conversation recently.
+    Human messages have a userId; bot/API messages don't.
+    """
+    try:
+        conversations = await get_contact_conversations(contact_id)
+        if not conversations:
+            return False
+        conv_id = conversations[0].get("id", "")
+        if not conv_id:
+            return False
+        messages = await get_conversation_messages(conv_id, limit=15)
+        # Walk messages newest-first looking for outbound messages
+        for msg in messages:
+            direction = msg.get("direction", "") or msg.get("messageType", "")
+            is_outbound = direction in ("outbound", "TYPE_OUTGOING", "outgoing")
+            if not is_outbound:
+                continue
+            user_id = msg.get("userId", "") or msg.get("user_id", "")
+            if user_id:
+                # Has a real userId = sent by a human agent in GHL UI
+                logger.info("[GHL] Human agent active for %s (userId=%s)", contact_id, user_id)
+                return True
+            # No userId = sent by our API bot — keep checking older messages
+        return False
+    except Exception as e:
+        logger.error("[GHL] Error checking human agent for %s: %s", contact_id, e)
+        return False  # On error, let bot respond
+
 async def get_latest_inbound_message(contact_id: str) -> dict | None:
     """Get the most recent inbound message from a contact"""
     try:

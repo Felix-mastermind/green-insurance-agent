@@ -4,7 +4,7 @@ Receives events from GHL and processes them
 """
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active
 from app.supabase_client import log_message, save_conversation_message
 
 router = APIRouter()
@@ -160,18 +160,9 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
         if is_inbound and contact_id:
             contact_name = extract_contact_name(payload)
 
-            # STOP bot if human agent already took over (check tags in payload)
-            contact_tags = payload.get("tags", "")
-            if isinstance(contact_tags, str):
-                tag_list = [t.strip().lower() for t in contact_tags.split(",")]
-            elif isinstance(contact_tags, list):
-                tag_list = [str(t).strip().lower() for t in contact_tags]
-            else:
-                tag_list = []
-
-            human_active_tags = {"necesita-asesor", "asesor-activo", "human-active", "bot-paused"}
-            if any(t in human_active_tags for t in tag_list):
-                print(f"[Webhook] SKIPPED — human agent handling {contact_name} ({contact_id})")
+            # STOP bot if a human agent has already responded in this conversation
+            if await human_agent_active(contact_id):
+                print(f"[Webhook] SKIPPED — human agent is active for {contact_name} ({contact_id})")
                 return {"status": "ok", "event": "skipped_human_active"}
 
             # Detect channel from GHL message type integer
