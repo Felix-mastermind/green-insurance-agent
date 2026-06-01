@@ -4,7 +4,7 @@ Receives events from GHL and processes them
 """
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel
 from app.supabase_client import log_message, save_conversation_message
 
 router = APIRouter()
@@ -165,16 +165,8 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
                 print(f"[Webhook] SKIPPED — human agent is active for {contact_name} ({contact_id})")
                 return {"status": "ok", "event": "skipped_human_active"}
 
-            # Detect channel from GHL message type integer
-            msg_obj = payload.get("message", {})
-            msg_type_int = msg_obj.get("type", 0) if isinstance(msg_obj, dict) else 0
-            # GHL message type: 1=SMS, 3=Email, 7=WhatsApp, 19=WhatsApp (older)
-            if msg_type_int in (1,):
-                channel = "SMS"
-            elif msg_type_int in (3, 7, 10, 19):
-                channel = "WhatsApp"
-            else:
-                channel = extract_channel(payload)
+            # Get the real channel from GHL conversation
+            channel = await get_contact_channel(contact_id)
 
             # If message body not in payload, fetch from GHL API
             if not message_body:
