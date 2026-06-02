@@ -40,7 +40,9 @@ PASO 2 - Segun el tipo, recopila esta informacion (una pregunta a la vez):
 
   AUTO:
   - Cual es tu direccion?
+  - Cuantos conductores van a estar en la poliza?
   - Que tipo de cobertura necesitas: solo liability (lo minimo requerido) o full coverage (cobertura completa)?
+  - Tienes seguro de auto activo actualmente o es un seguro nuevo?
 
   VIDA (Life):
   - Cuantas personas?
