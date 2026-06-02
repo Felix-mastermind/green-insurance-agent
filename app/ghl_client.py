@@ -345,27 +345,32 @@ async def add_contact_tag(contact_id: str, tag: str) -> dict:
         logger.error("[GHL] Error adding tag %s to %s: %s", tag, contact_id, e)
         return {}
 
+# Bot user ID — messages appear as "Asistente Green" in GHL
+BOT_USER_ID = "rM9FFKJ79TshgMmOZ7Nn"
+
 async def send_sms(contact_id: str, message: str) -> dict:
-    """Send SMS to a contact"""
+    """Send SMS to a contact as Asistente Green"""
     return await request_ghl(
         "POST",
         "/conversations/messages",
         json={
             "type": "SMS",
             "contactId": contact_id,
-            "message": message
+            "message": message,
+            "userId": BOT_USER_ID,
         }
     )
 
 async def send_whatsapp(contact_id: str, message: str) -> dict:
-    """Send WhatsApp message to a contact"""
+    """Send WhatsApp message to a contact as Asistente Green"""
     return await request_ghl(
         "POST",
         "/conversations/messages",
         json={
             "type": "WhatsApp",
             "contactId": contact_id,
-            "message": message
+            "message": message,
+            "userId": BOT_USER_ID,
         }
     )
 
