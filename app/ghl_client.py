@@ -262,16 +262,17 @@ async def get_contact_channel(contact_id: str) -> str:
             return "WhatsApp"
         conv = convs[0]
         # GHL conversation type field
-        conv_type = conv.get("type", "") or conv.get("channel", "") or conv.get("conversationType", "")
-        logger.info("[GHL] Conversation type for %s: %s", contact_id, conv_type)
-        # Map GHL types to our channel names
-        conv_type_upper = str(conv_type).upper()
-        if "SMS" in conv_type_upper or conv_type in ("1", 1):
+        # Use lastMessageType — most reliable indicator of channel
+        last_msg_type = conv.get("lastMessageType", "") or conv.get("type", "") or ""
+        logger.info("[GHL] lastMessageType for %s: %s", contact_id, last_msg_type)
+        last_upper = str(last_msg_type).upper()
+        if "SMS" in last_upper or last_msg_type in ("1", 1, "TYPE_SMS"):
             return "SMS"
-        if "WHATSAPP" in conv_type_upper or conv_type in ("7", 7, "10", 10):
+        if "WHATSAPP" in last_upper or last_msg_type in (19, "19", 7, "7", "TYPE_WHATSAPP"):
             return "WhatsApp"
-        if "LIVE" in conv_type_upper or "CHAT" in conv_type_upper:
-            return "WhatsApp"  # Fallback live chat → try WhatsApp
+        if "EMAIL" in last_upper:
+            return "Email"
+        # Default to WhatsApp (most common channel)
         return "WhatsApp"
     except Exception as e:
         logger.error("[GHL] Error getting channel for %s: %s", contact_id, e)
@@ -500,21 +501,27 @@ async def human_agent_active(contact_id: str, takeover_minutes: int = 5) -> bool
             )
 
         for msg in messages:
-            direction = (msg.get("direction", "") or msg.get("messageType", "") or "").lower()
-            is_outbound = direction in ("outbound", "type_outgoing", "outgoing", "1")
+            direction = (msg.get("direction", "") or "").lower()
+            is_outbound = direction == "outbound"
             if not is_outbound:
                 continue
 
-            # Check for human userId — handle nested user object too
-            user_id = (msg.get("userId", "") or
-                       msg.get("user_id", "") or
-                       (msg.get("user", {}) or {}).get("id", ""))
+            user_id = (msg.get("userId", "") or msg.get("user_id", ""))
             if not user_id:
-                continue  # Bot/API message — skip
+                continue  # No userId = not from a real agent
 
-            # Human message found — check how recent
-            date_str = (msg.get("dateAdded", "") or msg.get("createdAt", "") or
-                        msg.get("date", "") or msg.get("timestamp", ""))
+            # KEY CHECK: Bot/API messages have meta.marketplace — human messages don't
+            meta = msg.get("meta", {}) or {}
+            marketplace = meta.get("marketplace", "") if isinstance(meta, dict) else ""
+            if marketplace:
+                # This is a bot/API message — skip it
+                logger.debug("[GHL] Skipping API message from userId=%s (has marketplace)", user_id)
+                continue
+
+            # This is a real human message (userId present, no marketplace meta)
+            date_str = (msg.get("dateAdded", "") or msg.get("createdAt", "") or msg.get("date", ""))
+            logger.info("[GHL] Human message found: userId=%s date=%s", user_id, date_str[:19] if date_str else "?")
+
             if date_str:
                 try:
                     msg_time = dateutil.parser.parse(str(date_str))
@@ -522,21 +529,19 @@ async def human_agent_active(contact_id: str, takeover_minutes: int = 5) -> bool
                         msg_time = msg_time.replace(tzinfo=timezone.utc)
                     age_min = (datetime.now(timezone.utc) - msg_time).total_seconds() / 60
                     if age_min <= takeover_minutes:
-                        logger.info("[GHL] Human active %s: last response %.1f min ago — bot silent",
-                                    contact_id, age_min)
+                        logger.info("[GHL] Human active — responded %.1f min ago — bot silent for %s", age_min, contact_id)
                         return True
                     else:
-                        logger.info("[GHL] Human inactive %s: last response %.1f min ago — bot retakes",
-                                    contact_id, age_min)
+                        logger.info("[GHL] Human responded %.1f min ago (>%d) — bot retakes %s", age_min, takeover_minutes, contact_id)
                         return False
                 except Exception as ex:
                     logger.warning("[GHL] Date parse error: %s — staying silent", ex)
                     return True
             else:
-                logger.info("[GHL] Human message found but no date — staying silent")
-                return True
+                return True  # Human message, no date — stay silent to be safe
 
-        return False  # No human messages found — bot responds
+        logger.info("[GHL] No human messages found — bot responds for %s", contact_id)
+        return False
     except Exception as e:
         logger.error("[GHL] Error checking human agent for %s: %s", contact_id, e)
         return False  # On error, let bot respond
