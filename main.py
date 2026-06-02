@@ -16,6 +16,7 @@ from app.webhook_handler import router as webhook_router
 from app.supervisor import router as supervisor_router
 from app.payment_reminders import run_payment_reminders
 from app.renewal_reminders import run_renewal_reminders
+from app.follow_ups import run_follow_ups
 from app.ghl_client import (
     GHLIntegrationError,
     get_conversations,
@@ -66,8 +67,18 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
 
+    # Follow-ups - every 2 hours during business hours (11am-7pm ET)
+    for hour in [11, 13, 15, 17]:
+        scheduler.add_job(
+            run_follow_ups,
+            CronTrigger(hour=hour, minute=0, timezone=ET),
+            id=f"follow_ups_{hour}",
+            name=f"Follow Ups {hour}:00",
+            replace_existing=True
+        )
+
     scheduler.start()
-    print("[Agent] Scheduler started. Jobs: payment reminders (9am ET), renewals (10am ET)")
+    print("[Agent] Scheduler started. Jobs: payment (9am), renewals (10am), follow-ups (11am/1pm/3pm/5pm ET)")
     print("[Agent] Ready to receive webhooks from GHL")
 
     yield
@@ -99,6 +110,12 @@ async def root():
             "claude_agent"
         ]
     }
+
+@app.post("/run/follow-ups")
+async def trigger_follow_ups():
+    """Manually trigger follow-ups"""
+    result = await run_follow_ups()
+    return result
 
 @app.post("/run/payment-reminders")
 async def trigger_payment_reminders():
