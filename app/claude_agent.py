@@ -75,6 +75,8 @@ REGLAS:
 - Si el cliente ya dio todos los datos de su tipo de seguro, ve directo al paso 3.
 - Si el cliente pide hablar con alguien ya, ve directo al paso 3.
 - Si el cliente se va a ir sin dar info, di: "Entiendo! Si en algun momento necesitas ayuda con tu seguro, aqui estamos. Te puedo dejar el numero de nuestra oficina en Marietta: nos pueden llamar de L-V 11am-7pm."
+- Si el cliente dice que el numero es equivocado, responde: "Entiendo, disculpa la molestia." y retorna intent="wrong_number"
+- Si el cliente dice que no le interesa, responde: "Entendido, gracias por tu tiempo. Si en el futuro necesitas un seguro, aqui estaremos." y retorna intent="not_interested"
 
 Green Insurance - Marietta, GA 30060 | L-V 11am-7pm ET"""
 
@@ -114,11 +116,45 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     if len(history) >= 4:
         should_transfer = True
 
+    # Detect wrong_number and not_interested before calling AI
+    msg_lower = user_message.lower()
+    wrong_number_keywords = [
+        "numero equivocado", "wrong number", "not my number", "equivocado",
+        "se equivocaron", "wrong person", "no soy", "not me"
+    ]
+    not_interested_keywords = [
+        "no me interesa", "no estoy interesado", "not interested", "no gracias",
+        "no thank you", "no necesito", "don't need", "dont need", "ya tengo", "already have"
+    ]
+    if any(kw in msg_lower for kw in wrong_number_keywords):
+        reply = "Entiendo, disculpa la molestia."
+        await save_conversation_message(contact_id, "user", user_message)
+        await save_conversation_message(contact_id, "assistant", reply)
+        return {"response": reply, "should_transfer": False, "intent": "wrong_number"}
+    if any(kw in msg_lower for kw in not_interested_keywords):
+        reply = "Entendido, gracias por tu tiempo. Si en el futuro necesitas un seguro, aqui estaremos."
+        await save_conversation_message(contact_id, "user", user_message)
+        await save_conversation_message(contact_id, "assistant", reply)
+        return {"response": reply, "should_transfer": False, "intent": "not_interested"}
+
+    # Detect language — if message contains common English words, respond in English
+    english_indicators = [
+        "hello", "hi ", "hey ", "i ", "i'm", "i am", "my ", "me ", "we ", "do you",
+        "can you", "want", "need", "please", "thanks", "thank you", "yes", "no ",
+        "what", "how", "where", "when", "is ", "are ", "have ", "has ", "the ", "and "
+    ]
+    is_english = any(ind in f" {msg_lower} " for ind in english_indicators)
+    system_prompt = SYSTEM_PROMPT_ES
+    if is_english:
+        system_prompt = SYSTEM_PROMPT_ES + "
+
+IMPORTANT: The client is writing in English. Respond in English."
+
     try:
         response = get_client().messages.create(
             model="claude-sonnet-4-5",  # Current model (June 2026)
             max_tokens=300,
-            system=SYSTEM_PROMPT_ES,
+            system=system_prompt,
             messages=messages
         )
         ai_text = response.content[0].text
@@ -129,11 +165,11 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
 
         # Detect intent from response
         intent = "general"
-        if any(w in user_message.lower() for w in ["cita", "appointment", "agendar", "schedule"]):
+        if any(w in msg_lower for w in ["cita", "appointment", "agendar", "schedule"]):
             intent = "appointment"
-        elif any(w in user_message.lower() for w in ["precio", "costo", "price", "cost", "cuanto"]):
+        elif any(w in msg_lower for w in ["precio", "costo", "price", "cost", "cuanto"]):
             intent = "pricing"
-        elif any(w in user_message.lower() for w in ["dental", "salud", "health", "auto", "vida", "life"]):
+        elif any(w in msg_lower for w in ["dental", "salud", "health", "auto", "vida", "life"]):
             intent = "product_interest"
 
         return {

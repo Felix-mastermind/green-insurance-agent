@@ -173,15 +173,17 @@ def is_business_hours_followup() -> bool:
     return 14 <= now.hour < 17
 
 
-def detect_language(contact: dict) -> str:
-    """Detect language from contact tags"""
+def detect_language(contact: dict, stage_name: str = "") -> str:
+    """Detect language from contact tags or stage name"""
+    if stage_name.lower() == "english":
+        return "en"
     tags = contact.get("tags", [])
     if isinstance(tags, str):
         tags = [t.strip().lower() for t in tags.split(",")]
     tags_lower = [str(t).lower() for t in tags]
     if "english" in tags_lower or "en" in tags_lower:
         return "en"
-    return "es"  # default Spanish
+    return "es"
 
 
 def get_followup_key(today: datetime, contact_id: str, stage: str) -> str:
@@ -289,7 +291,7 @@ async def run_follow_ups():
             continue
 
         # Detect language and build message
-        lang = detect_language(contact_data)
+        lang = detect_language(contact_data, stage_name)
         first_name = contact_data.get("firstName", "") or contact_data.get("first_name", "Hola")
         template = stage_config.get(lang, stage_config.get("es", ""))
         if not template:

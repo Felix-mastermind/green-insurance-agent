@@ -577,3 +577,81 @@ async def get_latest_inbound_message(contact_id: str) -> dict | None:
     except Exception as e:
         logger.error("[GHL] Error fetching latest message for %s: %s", contact_id, e)
         return None
+
+# Stage IDs por pipeline para Wrong Number y Not Interested
+WRONG_NUMBER_STAGES = {
+    "BdzkOH5twVi9sCK2ag96": "ccd6cd2c-f582-42b5-bd10-86e8131300c8",  # Auto
+    "HzCwe9SCtirKXGFdFLVT": "e1a24e5d-1781-4d15-b03c-6e17b4535fdd",  # Dental (verificar)
+    "XrTzKSNz9VpYuSvVZzyH": "a0dd748d-6935-4a78-9972-0bc9fb0a3874",  # Life
+}
+
+NOT_INTERESTED_STAGES = {
+    "BdzkOH5twVi9sCK2ag96": "9f28ff58-da56-4938-9843-21bc60281b28",  # Auto
+    "HzCwe9SCtirKXGFdFLVT": "ae120912-5fba-4fb0-af67-8c8aa12da6f4",  # Dental
+    "XrTzKSNz9VpYuSvVZzyH": "bbda9122-3539-4f8b-843a-b002d8213a78",  # Life
+}
+
+async def send_email(contact_id: str, subject: str, body: str) -> dict:
+    """Send email to a contact via GHL conversations"""
+    conv_id = await get_contact_conversation_id(contact_id)
+    if not conv_id:
+        logger.error("[GHL] No conversation found for email to %s", contact_id)
+        return {}
+    return await request_ghl(
+        "POST",
+        "/conversations/messages",
+        json={
+            "type": "Email",
+            "conversationId": conv_id,
+            "subject": subject,
+            "html": body,
+            "body": body,
+        }
+    )
+
+def is_valid_email(email: str) -> bool:
+    """Basic email validation to avoid bounces"""
+    import re
+    if not email or not isinstance(email, str):
+        return False
+    pattern = r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(pattern, email.strip()))
+
+async def move_to_wrong_number(contact_id: str) -> bool:
+    """Move contact's opportunity to Wrong Number stage"""
+    opportunities = await get_contact_opportunities(contact_id)
+    if not opportunities:
+        return False
+    moved = False
+    for opp in opportunities:
+        pipeline_id = opp.get("pipelineId", "")
+        stage_id = WRONG_NUMBER_STAGES.get(pipeline_id)
+        if stage_id:
+            await update_contact_stage(opp.get("id", ""), stage_id)
+            moved = True
+    return moved
+
+async def move_to_not_interested(contact_id: str) -> bool:
+    """Move contact's opportunity to Not Interested stage"""
+    opportunities = await get_contact_opportunities(contact_id)
+    if not opportunities:
+        return False
+    moved = False
+    for opp in opportunities:
+        pipeline_id = opp.get("pipelineId", "")
+        stage_id = NOT_INTERESTED_STAGES.get(pipeline_id)
+        if stage_id:
+            await update_contact_stage(opp.get("id", ""), stage_id)
+            moved = True
+    return moved
+
+async def get_contact_pipeline(contact_id: str) -> tuple[str, str]:
+    """Returns (pipeline_id, pipeline_name) for the contact's first active opportunity"""
+    opportunities = await get_contact_opportunities(contact_id)
+    for opp in opportunities:
+        pid = opp.get("pipelineId", "")
+        from app.follow_ups import PIPELINES
+        name = PIPELINES.get(pid, "")
+        if name:
+            return pid, name
+    return "", ""

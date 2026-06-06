@@ -4,7 +4,7 @@ Receives events from GHL and processes them
 """
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, send_email, is_valid_email
 from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
 
 router = APIRouter()
@@ -75,7 +75,25 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
                       "lead_response", response_text, status,
                       {"intent": ai_result.get("intent"), "transferred": should_transfer})
 
-    if should_transfer:
+    # Handle wrong number
+    if ai_result.get("intent") == "wrong_number":
+        moved = await move_to_wrong_number(contact_id)
+        contact_data = await get_contact(contact_id)
+        email = (contact_data or {}).get("email", "")
+        if email and is_valid_email(email):
+            subject = "Green Insurance - Verificacion de contacto"
+            body = f"Hola, recibimos un mensaje indicando que este numero no corresponde a {contact_name}. Si esto es un error, por favor contactenos. Green Insurance - Marietta, GA"
+            await send_email(contact_id, subject, body)
+            print(f"[Webhook] Wrong number for {contact_name} — moved to stage, email sent to {email}")
+        else:
+            print(f"[Webhook] Wrong number for {contact_name} — moved to stage, no valid email")
+
+    # Handle not interested
+    elif ai_result.get("intent") == "not_interested":
+        await move_to_not_interested(contact_id)
+        print(f"[Webhook] Not interested: {contact_name} — moved to Not Interested stage")
+
+    elif should_transfer:
         transfer_msg = ("Un asesor de Green Insurance se comunicara contigo en breve. "
                         "Gracias por tu paciencia!")
         if channel == "SMS":
