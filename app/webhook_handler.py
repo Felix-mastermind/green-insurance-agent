@@ -5,7 +5,7 @@ Receives events from GHL and processes them
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
 from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel
-from app.supabase_client import log_message, save_conversation_message
+from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
 
 router = APIRouter()
 
@@ -18,10 +18,50 @@ AGENTS = {
     "Sharon Jones":    "axXwrCLjvTuDMBSiMoPa",
 }
 
+BARBARA_ID = AGENTS["Barbara Quintero"]
+REVIEW_LINK = "https://share.google/07auFx6a4aT7D7ht6"
+
+
+async def handle_survey_response(contact_id: str, contact_name: str, score: int, channel: str):
+    """Handle a 1-5 survey response from a Won contact"""
+    await mark_survey_answered(contact_id)
+    if score >= 3:
+        stars = "⭐" * score
+        msg = (f"Hola {contact_name}! Gracias por tu calificación {stars} "
+               f"¡Nos alegra mucho saberlo! Si puedes dejarnos una reseña rápida "
+               f"te lo agradecemos mucho: {REVIEW_LINK}")
+        if channel == "SMS":
+            await send_sms(contact_id, msg)
+        else:
+            await send_whatsapp(contact_id, msg)
+        print(f"[Survey] ✅ {contact_name} calificó {score}/5 — se envió link de reseña")
+    else:
+        msg = (f"Hola {contact_name}, lamentamos que tu experiencia no haya sido la mejor. "
+               f"¿Podrías contarnos qué podemos mejorar? "
+               f"Un asesor se comunicará contigo pronto.")
+        if channel == "SMS":
+            await send_sms(contact_id, msg)
+        else:
+            await send_whatsapp(contact_id, msg)
+        await create_task(
+            contact_id,
+            title=f"⚠️ Mala reseña ({score}/5) — {contact_name} | Verificar caso",
+            assigned_to=BARBARA_ID,
+            due_hours=2
+        )
+        await add_internal_note(contact_id, f"Cliente calificó el servicio con {score}/5. Se notificó a Barbara Quintero.")
+        print(f"[Survey] ⚠️ {contact_name} calificó {score}/5 — mensaje de feedback + tarea a Barbara")
+
 async def process_inbound_message(contact_id: str, message: str, channel: str, contact_name: str, assigned_user_id: str = ""):
     """Process incoming message from a lead"""
     print(f"[Webhook] Inbound {channel} from {contact_name} ({contact_id}): {message[:50]}...")
 
+
+    # If contact has a pending survey, handle the 1-5 response before AI
+    msg_stripped = message.strip()
+    if msg_stripped in ("1", "2", "3", "4", "5") and await check_survey_pending(contact_id):
+        await handle_survey_response(contact_id, contact_name, int(msg_stripped), channel)
+        return
     # Get AI response
     ai_result = await get_ai_response(contact_id, message, contact_name)
     response_text = ai_result["response"]

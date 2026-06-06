@@ -112,3 +112,42 @@ async def get_conversation_history(contact_id: str, limit: int = 10) -> list:
         order="created_at.desc"
     )
     return list(reversed(rows))
+
+
+async def log_survey_sent(contact_id: str, contact_name: str) -> bool:
+    """Record that a review survey was sent to this contact"""
+    return await _insert("review_surveys", {
+        "contact_id": contact_id,
+        "contact_name": contact_name,
+        "status": "pending"
+    })
+
+
+async def check_survey_pending(contact_id: str) -> bool:
+    """Check if this contact has an unanswered review survey"""
+    rows = await _select(
+        "review_surveys",
+        {"contact_id": f"eq.{contact_id}", "status": f"eq.pending"},
+        columns="id",
+        limit=1
+    )
+    return len(rows) > 0
+
+
+async def mark_survey_answered(contact_id: str) -> bool:
+    """Mark the survey as answered so it doesn't trigger again"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return False
+    try:
+        headers = {**get_headers(), "Prefer": ""}
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.patch(
+                rest_url("review_surveys"),
+                headers=headers,
+                params={"contact_id": f"eq.{contact_id}", "status": f"eq.pending"},
+                json={"status": "answered"}
+            )
+            return r.status_code in (200, 204)
+    except Exception as e:
+        print(f"[Supabase] mark_survey_answered error: {e}")
+        return False

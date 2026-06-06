@@ -9,7 +9,7 @@ from app.ghl_client import (
     get_opportunities, get_pipelines, send_whatsapp, send_sms,
     get_contact, add_contact_tag, create_task, get_contact_channel
 )
-from app.supabase_client import check_reminder_sent, log_reminder_sent
+from app.supabase_client import check_reminder_sent, log_reminder_sent, log_survey_sent
 
 ET = pytz.timezone("America/New_York")
 
@@ -77,8 +77,22 @@ MESSAGES = {
             "days": 1,
         },
         "Won": {
-            "es": "Hola {name}! 🎉 Gracias por confiar en Green Insurance para tu seguro dental. ¿Podrías dejarnos una reseña rápida? ¡Nos ayuda mucho! 👉 https://share.google/07auFx6a4aT7D7ht6",
-            "en": "Hi {name}! 🎉 Thank you for trusting Green Insurance for your dental coverage. Could you leave us a quick review? It means a lot! 👉 https://share.google/07auFx6a4aT7D7ht6",
+            "es": "Hola {name}! 💚 Gracias por elegir Green Insurance. ¿Cómo te pareció nuestro servicio?
+
+Responde con un número:
+1️⃣ Malo
+2️⃣ Regular
+3️⃣ Bueno
+4️⃣ Muy bueno
+5️⃣ Excelente",
+            "en": "Hi {name}! 💚 Thank you for choosing Green Insurance. How would you rate our service?
+
+Reply with a number:
+1️⃣ Poor
+2️⃣ Fair
+3️⃣ Good
+4️⃣ Very good
+5️⃣ Excellent",
             "days": 1,
         },
     },
@@ -125,8 +139,22 @@ MESSAGES = {
             "days": 2,
         },
         "Won": {
-            "es": "Hola {name}! 🎉 Gracias por confiar en Green Insurance para tu seguro de auto. ¿Podrías dejarnos una reseña rápida? ¡Nos ayuda mucho! 👉 https://share.google/07auFx6a4aT7D7ht6",
-            "en": "Hi {name}! 🎉 Thank you for trusting Green Insurance for your auto insurance. Could you leave us a quick review? It means a lot! 👉 https://share.google/07auFx6a4aT7D7ht6",
+            "es": "Hola {name}! 💚 Gracias por elegir Green Insurance. ¿Cómo te pareció nuestro servicio?
+
+Responde con un número:
+1️⃣ Malo
+2️⃣ Regular
+3️⃣ Bueno
+4️⃣ Muy bueno
+5️⃣ Excelente",
+            "en": "Hi {name}! 💚 Thank you for choosing Green Insurance. How would you rate our service?
+
+Reply with a number:
+1️⃣ Poor
+2️⃣ Fair
+3️⃣ Good
+4️⃣ Very good
+5️⃣ Excellent",
             "days": 1,
         },
     },
@@ -173,8 +201,22 @@ MESSAGES = {
             "days": 1,
         },
         "Won": {
-            "es": "Hola {name}! 🎉 Gracias por confiar en Green Insurance para tu seguro de vida. ¿Podrías dejarnos una reseña rápida? ¡Nos ayuda mucho! 👉 https://share.google/07auFx6a4aT7D7ht6",
-            "en": "Hi {name}! 🎉 Thank you for trusting Green Insurance for your life insurance. Could you leave us a quick review? It means a lot! 👉 https://share.google/07auFx6a4aT7D7ht6",
+            "es": "Hola {name}! 💚 Gracias por elegir Green Insurance. ¿Cómo te pareció nuestro servicio?
+
+Responde con un número:
+1️⃣ Malo
+2️⃣ Regular
+3️⃣ Bueno
+4️⃣ Muy bueno
+5️⃣ Excelente",
+            "en": "Hi {name}! 💚 Thank you for choosing Green Insurance. How would you rate our service?
+
+Reply with a number:
+1️⃣ Poor
+2️⃣ Fair
+3️⃣ Good
+4️⃣ Very good
+5️⃣ Excellent",
             "days": 1,
         },
     },
@@ -321,6 +363,8 @@ async def run_follow_ups():
         success = await send_followup(contact_data, message, channel)
         if success:
             await log_reminder_sent(contact_id, first_name, 0, f"followup_{product}_{stage_name[:15]}", today.strftime("%Y-%m"))
+            if stage_name == "Won":
+                await log_survey_sent(contact_id, first_name)
             sent += 1
             print(f"[FollowUp] ✅ Sent to {first_name} ({contact_id}) | {product} | {stage_name}")
         else:
