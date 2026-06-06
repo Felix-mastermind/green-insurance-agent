@@ -165,14 +165,14 @@ MESSAGES = {
 # ─── Cross-sell messages for rejected/lost stages ────────────────────────────
 # Key: product currently in → other products to offer
 OTHER_PRODUCTS = {
-    "dental": "auto, vida y salud",
-    "auto":   "dental, vida y salud",
-    "life":   "auto, dental y salud",
+    "dental": "auto y vida",
+    "auto":   "dental y vida",
+    "life":   "auto y dental",
 }
 OTHER_PRODUCTS_EN = {
-    "dental": "auto, life, and health",
-    "auto":   "dental, life, and health",
-    "life":   "auto, dental, and health",
+    "dental": "auto and life",
+    "auto":   "dental and life",
+    "life":   "auto and dental",
 }
 
 CROSS_SELL_STAGES = {"Not interested", "Not Interested", "Not Insterested", "Not Eligible", "Offer not accepted"}
