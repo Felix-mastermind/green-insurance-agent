@@ -67,18 +67,24 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
 
-    # Follow-ups - every 2 hours during business hours (11am-7pm ET)
-    for hour in [11, 13, 15, 17]:
-        scheduler.add_job(
-            run_follow_ups,
-            CronTrigger(hour=hour, minute=0, timezone=ET),
-            id=f"follow_ups_{hour}",
-            name=f"Follow Ups {hour}:00",
-            replace_existing=True
-        )
+    # Follow-ups - 2:00pm and 4:30pm ET
+    scheduler.add_job(
+        run_follow_ups,
+        CronTrigger(hour=14, minute=0, timezone=ET),
+        id="follow_ups_1400",
+        name="Follow Ups 14:00",
+        replace_existing=True
+    )
+    scheduler.add_job(
+        run_follow_ups,
+        CronTrigger(hour=16, minute=30, timezone=ET),
+        id="follow_ups_1630",
+        name="Follow Ups 16:30",
+        replace_existing=True
+    )
 
     scheduler.start()
-    print("[Agent] Scheduler started. Jobs: payment (9am), renewals (10am), follow-ups (11am/1pm/3pm/5pm ET)")
+    print("[Agent] Scheduler started. Jobs: payment (9am), renewals (10am), follow-ups (2pm/4:30pm ET)")
     print("[Agent] Ready to receive webhooks from GHL")
 
     yield

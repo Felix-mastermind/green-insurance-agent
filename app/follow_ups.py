@@ -6,7 +6,7 @@ Reviews leads by stage in active pipelines and sends product-specific follow-up 
 import pytz
 from datetime import datetime, timedelta
 from app.ghl_client import (
-    get_opportunities, send_whatsapp, send_sms,
+    get_opportunities, get_pipelines, send_whatsapp, send_sms,
     get_contact, add_contact_tag, create_task, get_contact_channel
 )
 from app.supabase_client import check_reminder_sent, log_reminder_sent
@@ -168,9 +168,9 @@ MESSAGES = {
 
 
 def is_business_hours_followup() -> bool:
-    """Only send follow-ups during business hours 11am-7pm ET"""
+    """Only send follow-ups at scheduled times (2pm-5pm ET)"""
     now = datetime.now(ET)
-    return 11 <= now.hour < 19
+    return 14 <= now.hour < 17
 
 
 def detect_language(contact: dict) -> str:
@@ -213,7 +213,18 @@ async def run_follow_ups():
     today = now.date()
     print(f"[FollowUp] Starting follow-up run at {now.strftime('%Y-%m-%d %H:%M ET')}")
 
+    # Build stageId -> stageName map from pipeline data
+    stage_map = {}
+    try:
+        pipelines = await get_pipelines()
+        for pipeline in pipelines:
+            for stage in pipeline.get("stages", []):
+                stage_map[stage["id"]] = stage["name"]
+    except Exception as e:
+        print(f"[FollowUp] Warning: could not load pipeline stages: {e}")
+
     opportunities = await get_opportunities()
+    print(f"[FollowUp] Fetched {len(opportunities)} opportunities total")
     processed = 0
     sent = 0
     skipped = 0
@@ -224,8 +235,10 @@ async def run_follow_ups():
         if not product:
             continue  # Not an active pipeline
 
-        stage_name = (opp.get("stage", {}) or {}).get("name", "") if isinstance(opp.get("stage"), dict) else ""
+        stage_id = opp.get("pipelineStageId", "")
+        stage_name = stage_map.get(stage_id, "")
         if not stage_name:
+            print(f"[FollowUp] No stage name for stageId={stage_id}")
             continue
 
         # Skip terminal/inactive stages
