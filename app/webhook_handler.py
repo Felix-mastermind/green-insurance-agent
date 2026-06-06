@@ -46,7 +46,7 @@ async def handle_survey_response(contact_id: str, contact_name: str, score: int,
         )
         barbara_msg = (f"⚠️ Alerta: El cliente {contact_name} calificó el servicio con {score}/5. "
                        f"Por favor verifica el caso.")
-        await send_whatsapp(BARBARA_CONTACT_ID, barbara_msg)
+        await send_sms(BARBARA_CONTACT_ID, barbara_msg)
         print(f"[Survey] ⚠️ {contact_name} calificó {score}/5 — mensaje de feedback + tarea a Barbara")
 
 async def process_inbound_message(contact_id: str, message: str, channel: str, contact_name: str, assigned_user_id: str = ""):
