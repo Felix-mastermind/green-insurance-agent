@@ -18,7 +18,7 @@ AGENTS = {
     "Sharon Jones":    "axXwrCLjvTuDMBSiMoPa",
 }
 
-BARBARA_ID = AGENTS["Barbara Quintero"]
+BARBARA_CONTACT_ID = "Fr2WbOMJcsnKPC01S0Dz"
 REVIEW_LINK = "https://share.google/07auFx6a4aT7D7ht6"
 
 
@@ -43,13 +43,10 @@ async def handle_survey_response(contact_id: str, contact_name: str, score: int,
             await send_sms(contact_id, msg)
         else:
             await send_whatsapp(contact_id, msg)
-        await create_task(
-            contact_id,
-            title=f"⚠️ Mala reseña ({score}/5) — {contact_name} | Verificar caso",
-            assigned_to=BARBARA_ID,
-            due_hours=2
         )
-        await add_internal_note(contact_id, f"Cliente calificó el servicio con {score}/5. Se notificó a Barbara Quintero.")
+        barbara_msg = (f"⚠️ Alerta: El cliente {contact_name} calificó el servicio con {score}/5. "
+                       f"Por favor verifica el caso.")
+        await send_whatsapp(BARBARA_CONTACT_ID, barbara_msg)
         print(f"[Survey] ⚠️ {contact_name} calificó {score}/5 — mensaje de feedback + tarea a Barbara")
 
 async def process_inbound_message(contact_id: str, message: str, channel: str, contact_name: str, assigned_user_id: str = ""):
@@ -89,12 +86,6 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         # Move opportunity to HOT Leads stage in GHL pipeline
         moved = await move_to_hot_lead(contact_id)
         # Create task for the assigned agent
-        await create_task(
-            contact_id,
-            title=f"HOT Lead — {contact_name} | {intent_label} | '{user_message[:60]}'",
-            assigned_to=assigned_user_id,
-            due_hours=1
-        )
         await add_contact_tag(contact_id, "necesita-asesor")
         print(f"[Webhook] Transfer for {contact_name} — moved to HOT Leads: {moved}")
 
