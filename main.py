@@ -77,6 +77,11 @@ async def lifespan(app: FastAPI):
     )
 
     scheduler.start()
+
+    # Run follow-ups immediately on startup to catch all existing leads
+    import asyncio
+    asyncio.get_event_loop().create_task(run_follow_ups(force=True))
+    print("[Agent] Startup follow-up triggered — reviewing all leads")
     print("[Agent] Scheduler started. Jobs: renewals (10am), follow-ups (2pm/4:30pm ET)")
     print("[Agent] Ready to receive webhooks from GHL")
 

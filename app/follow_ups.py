@@ -217,9 +217,9 @@ async def send_followup(contact: dict, message: str, channel: str = "WhatsApp") 
         return False
 
 
-async def run_follow_ups():
+async def run_follow_ups(force: bool = False):
     """Main follow-up runner — checks all leads in active pipelines by stage"""
-    if not is_business_hours_followup():
+    if not force and not is_business_hours_followup():
         print("[FollowUp] Outside business hours — skipping")
         return {"status": "skipped", "reason": "outside_hours"}
 
