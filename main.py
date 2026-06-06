@@ -14,7 +14,6 @@ from contextlib import asynccontextmanager
 
 from app.webhook_handler import router as webhook_router
 from app.supervisor import router as supervisor_router
-from app.payment_reminders import run_payment_reminders
 from app.renewal_reminders import run_renewal_reminders
 from app.follow_ups import run_follow_ups
 from app.ghl_client import (
@@ -49,12 +48,6 @@ async def lifespan(app: FastAPI):
     for route in registered_routes():
         print(f"[Route] {','.join(route['methods'])} {route['path']} -> {route['name']}")
 
-    # Payment reminders - daily at 9:00am ET
-    scheduler.add_job(
-        run_payment_reminders,
-        CronTrigger(hour=9, minute=0, timezone=ET),
-        id="payment_reminders",
-        name="Payment Reminders",
         replace_existing=True
     )
 
@@ -84,7 +77,7 @@ async def lifespan(app: FastAPI):
     )
 
     scheduler.start()
-    print("[Agent] Scheduler started. Jobs: payment (9am), renewals (10am), follow-ups (2pm/4:30pm ET)")
+    print("[Agent] Scheduler started. Jobs: renewals (10am), follow-ups (2pm/4:30pm ET)")
     print("[Agent] Ready to receive webhooks from GHL")
 
     yield
@@ -110,7 +103,6 @@ async def root():
         "version": "1.0.0",
         "status": "running",
         "modules": [
-            "payment_reminders",
             "renewal_reminders",
             "webhook_handler",
             "claude_agent"
@@ -121,12 +113,6 @@ async def root():
 async def trigger_follow_ups():
     """Manually trigger follow-ups"""
     result = await run_follow_ups()
-    return result
-
-@app.post("/run/payment-reminders")
-async def trigger_payment_reminders():
-    """Manually trigger payment reminders (for testing)"""
-    result = await run_payment_reminders()
     return result
 
 @app.post("/run/renewal-reminders")

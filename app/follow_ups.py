@@ -23,12 +23,8 @@ PIPELINES = {
 # ─── Stages to skip (won, lost, DND, etc.) ───────────────────────────────────
 SKIP_STAGES = {
     "Won", "won",
-    "Not interested", "Not Interested", "Not Insterested",
     "DND",
-    "Not Eligible",
-    "Offer not accepted",
     "Wrong number", "Wrong Number",
-    "Already Insured",
 }
 
 # Stages where we DO NOT send follow-ups (asesor is actively working them)
@@ -166,6 +162,22 @@ MESSAGES = {
     },
 }
 
+# ─── Cross-sell messages for rejected/lost stages ────────────────────────────
+# Key: product currently in → other products to offer
+OTHER_PRODUCTS = {
+    "dental": "auto, vida y salud",
+    "auto":   "dental, vida y salud",
+    "life":   "auto, dental y salud",
+}
+OTHER_PRODUCTS_EN = {
+    "dental": "auto, life, and health",
+    "auto":   "dental, life, and health",
+    "life":   "auto, dental, and health",
+}
+
+CROSS_SELL_STAGES = {"Not interested", "Not Interested", "Not Insterested", "Not Eligible", "Offer not accepted"}
+ALREADY_INSURED_STAGES = {"Already Insured"}
+
 
 def is_business_hours_followup() -> bool:
     """Only send follow-ups at scheduled times (2pm-5pm ET)"""
@@ -245,6 +257,63 @@ async def run_follow_ups():
 
         # Skip terminal/inactive stages
         if any(stage_name.lower() == s.lower() for s in SKIP_STAGES):
+            continue
+
+        # ─── Cross-sell: Not Interested / Not Eligible / Offer Not Accepted ───
+        if stage_name in CROSS_SELL_STAGES:
+            contact_id = opp.get("contactId", "")
+            if not contact_id:
+                continue
+            already_sent = await check_reminder_sent(contact_id, f"crosssell_{product}", today.strftime("%Y-%m"))
+            if already_sent:
+                skipped += 1
+                continue
+            contact_data = await get_contact(contact_id)
+            if not contact_data:
+                continue
+            lang = detect_language(contact_data, stage_name)
+            first_name = contact_data.get("firstName", "") or "Hola"
+            others = OTHER_PRODUCTS_EN.get(product, "") if lang == "en" else OTHER_PRODUCTS.get(product, "")
+            if lang == "en":
+                msg = f"Hi {first_name}! We understand {product} insurance wasn't the right fit. Did you know we also offer {others}? We'd love to help you find the right coverage."
+            else:
+                msg = f"Hola {first_name}! Entendemos que el seguro de {product} no era lo que buscabas. ¿Sabías que también ofrecemos {others}? Nos encantaría ayudarte a encontrar la cobertura ideal."
+            channel = await get_contact_channel(contact_id)
+            if channel == "SMS":
+                await send_sms(contact_id, msg)
+            else:
+                await send_whatsapp(contact_id, msg)
+            await log_reminder_sent(contact_id, first_name, 0, f"crosssell_{product}", today.strftime("%Y-%m"))
+            sent += 1
+            print(f"[FollowUp] \U0001f504 Cross-sell sent to {first_name} ({contact_id}) | was: {product}")
+            continue
+
+        # ─── Already Insured: send once a month ──────────────────────────────
+        if stage_name in ALREADY_INSURED_STAGES:
+            contact_id = opp.get("contactId", "")
+            if not contact_id:
+                continue
+            already_sent = await check_reminder_sent(contact_id, f"already_insured_{product}", today.strftime("%Y-%m"))
+            if already_sent:
+                skipped += 1
+                continue
+            contact_data = await get_contact(contact_id)
+            if not contact_data:
+                continue
+            lang = detect_language(contact_data, stage_name)
+            first_name = contact_data.get("firstName", "") or "Hola"
+            if lang == "en":
+                msg = f"Hi {first_name}! We know you already have insurance, but we're still here whenever you want to compare options. We have a variety of plans that might surprise you!"
+            else:
+                msg = f"Hola {first_name}! Sabemos que ya cuentas con seguro, pero seguimos aquí por si algún día quieres cotizar. Tenemos varias opciones que podrían sorprenderte."
+            channel = await get_contact_channel(contact_id)
+            if channel == "SMS":
+                await send_sms(contact_id, msg)
+            else:
+                await send_whatsapp(contact_id, msg)
+            await log_reminder_sent(contact_id, first_name, 0, f"already_insured_{product}", today.strftime("%Y-%m"))
+            sent += 1
+            print(f"[FollowUp] \U0001f3e0 Already Insured msg sent to {first_name} ({contact_id})")
             continue
 
         # Get message template for this stage + product
