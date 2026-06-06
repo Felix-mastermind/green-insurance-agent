@@ -92,7 +92,11 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         if appt.get("id") or appt.get("appointmentId"):
             await move_to_appointment_booked(contact_id)
             _, product = await get_contact_pipeline(contact_id)
-            msg = f"Cita agendada con {contact_name}{' — ' + product if product else ''}. Revisa tu calendario."
+            contact_info = await get_contact(contact_id)
+            phone = (contact_info or {}).get("phone", "") or ""
+            phone_str = " | Tel: " + phone if phone else ""
+            product_str = " | Seguro: " + product if product else ""
+            msg = f"📅 Cita agendada | Lead: {contact_name}{phone_str}{product_str}. Revisa tu calendario."
             advisor_contact_id = AGENTS_CONTACTS.get(assigned_uid, "")
             if advisor_contact_id:
                 await send_sms(advisor_contact_id, msg)

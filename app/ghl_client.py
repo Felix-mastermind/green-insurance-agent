@@ -689,9 +689,14 @@ async def get_opportunity_assigned_user(contact_id: str) -> str:
 
 async def notify_advisor_call_requested(contact_id: str, contact_name: str, assigned_user_id: str, product: str = "") -> None:
     """Notify assigned advisor + Barbara that client wants immediate call"""
-    msg = (f"📞 {contact_name} quiere que lo llamen ahora"
-           f"{' — seguro ' + product if product else ''}. "
-           f"Por favor llámalo lo antes posible.")
+    try:
+        contact_data = await get_contact(contact_id)
+        phone = (contact_data or {}).get("phone", "") or ""
+    except Exception:
+        phone = ""
+    phone_str = " | Tel: " + phone if phone else ""
+    product_str = " | Seguro: " + product if product else ""
+    msg = f"📞 Lead: {contact_name}{phone_str}{product_str}. Quiere que lo llamen ahora. Por favor llamalo lo antes posible."
 
     # Notify assigned advisor
     advisor_contact_id = AGENTS_CONTACTS.get(assigned_user_id, "")
