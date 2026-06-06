@@ -22,7 +22,6 @@ PIPELINES = {
 
 # ─── Stages to skip (won, lost, DND, etc.) ───────────────────────────────────
 SKIP_STAGES = {
-    "Won", "won",
     "Not interested", "Not Interested", "Not Insterested",
     "DND",
     "Not Eligible",
@@ -77,6 +76,11 @@ MESSAGES = {
             "en": "Hi {name}! We noticed you missed your appointment. No worries — when would you like to reschedule for your dental insurance?",
             "days": 1,
         },
+        "Won": {
+            "es": "Hola {name}! 🎉 Gracias por confiar en Green Insurance para tu seguro dental. ¿Podrías dejarnos una reseña rápida? ¡Nos ayuda mucho! 👉 https://share.google/07auFx6a4aT7D7ht6",
+            "en": "Hi {name}! 🎉 Thank you for trusting Green Insurance for your dental coverage. Could you leave us a quick review? It means a lot! 👉 https://share.google/07auFx6a4aT7D7ht6",
+            "days": 1,
+        },
     },
 
     "auto": {
@@ -120,6 +124,11 @@ MESSAGES = {
             "en": "Hi {name}! Were you able to review your auto insurance quote? We're here to answer any questions before you decide.",
             "days": 2,
         },
+        "Won": {
+            "es": "Hola {name}! 🎉 Gracias por confiar en Green Insurance para tu seguro de auto. ¿Podrías dejarnos una reseña rápida? ¡Nos ayuda mucho! 👉 https://share.google/07auFx6a4aT7D7ht6",
+            "en": "Hi {name}! 🎉 Thank you for trusting Green Insurance for your auto insurance. Could you leave us a quick review? It means a lot! 👉 https://share.google/07auFx6a4aT7D7ht6",
+            "days": 1,
+        },
     },
 
     "life": {
@@ -161,6 +170,11 @@ MESSAGES = {
         "Missed Appointment": {
             "es": "Hola {name}! No pudiste asistir a tu cita para el seguro de vida. ¿Cuándo podemos reagendar?",
             "en": "Hi {name}! You missed your life insurance appointment. When can we reschedule?",
+            "days": 1,
+        },
+        "Won": {
+            "es": "Hola {name}! 🎉 Gracias por confiar en Green Insurance para tu seguro de vida. ¿Podrías dejarnos una reseña rápida? ¡Nos ayuda mucho! 👉 https://share.google/07auFx6a4aT7D7ht6",
+            "en": "Hi {name}! 🎉 Thank you for trusting Green Insurance for your life insurance. Could you leave us a quick review? It means a lot! 👉 https://share.google/07auFx6a4aT7D7ht6",
             "days": 1,
         },
     },
