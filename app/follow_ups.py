@@ -9,7 +9,7 @@ from app.ghl_client import (
     get_opportunities, get_pipelines, send_whatsapp, send_sms,
     get_contact, add_contact_tag, create_task, get_contact_channel
 )
-from app.supabase_client import check_reminder_sent, log_reminder_sent, log_survey_sent
+from app.supabase_client import check_reminder_sent, log_reminder_sent
 
 ET = pytz.timezone("America/New_York")
 
@@ -22,6 +22,7 @@ PIPELINES = {
 
 # ─── Stages to skip (won, lost, DND, etc.) ───────────────────────────────────
 SKIP_STAGES = {
+    "Won", "won",
     "Not interested", "Not Interested", "Not Insterested",
     "DND",
     "Not Eligible",
@@ -76,25 +77,6 @@ MESSAGES = {
             "en": "Hi {name}! We noticed you missed your appointment. No worries — when would you like to reschedule for your dental insurance?",
             "days": 1,
         },
-        "Won": {
-            "es": "Hola {name}! 💚 Gracias por elegir Green Insurance. ¿Cómo te pareció nuestro servicio?
-
-Responde con un número:
-1️⃣ Malo
-2️⃣ Regular
-3️⃣ Bueno
-4️⃣ Muy bueno
-5️⃣ Excelente",
-            "en": "Hi {name}! 💚 Thank you for choosing Green Insurance. How would you rate our service?
-
-Reply with a number:
-1️⃣ Poor
-2️⃣ Fair
-3️⃣ Good
-4️⃣ Very good
-5️⃣ Excellent",
-            "days": 1,
-        },
     },
 
     "auto": {
@@ -138,25 +120,6 @@ Reply with a number:
             "en": "Hi {name}! Were you able to review your auto insurance quote? We're here to answer any questions before you decide.",
             "days": 2,
         },
-        "Won": {
-            "es": "Hola {name}! 💚 Gracias por elegir Green Insurance. ¿Cómo te pareció nuestro servicio?
-
-Responde con un número:
-1️⃣ Malo
-2️⃣ Regular
-3️⃣ Bueno
-4️⃣ Muy bueno
-5️⃣ Excelente",
-            "en": "Hi {name}! 💚 Thank you for choosing Green Insurance. How would you rate our service?
-
-Reply with a number:
-1️⃣ Poor
-2️⃣ Fair
-3️⃣ Good
-4️⃣ Very good
-5️⃣ Excellent",
-            "days": 1,
-        },
     },
 
     "life": {
@@ -198,25 +161,6 @@ Reply with a number:
         "Missed Appointment": {
             "es": "Hola {name}! No pudiste asistir a tu cita para el seguro de vida. ¿Cuándo podemos reagendar?",
             "en": "Hi {name}! You missed your life insurance appointment. When can we reschedule?",
-            "days": 1,
-        },
-        "Won": {
-            "es": "Hola {name}! 💚 Gracias por elegir Green Insurance. ¿Cómo te pareció nuestro servicio?
-
-Responde con un número:
-1️⃣ Malo
-2️⃣ Regular
-3️⃣ Bueno
-4️⃣ Muy bueno
-5️⃣ Excelente",
-            "en": "Hi {name}! 💚 Thank you for choosing Green Insurance. How would you rate our service?
-
-Reply with a number:
-1️⃣ Poor
-2️⃣ Fair
-3️⃣ Good
-4️⃣ Very good
-5️⃣ Excellent",
             "days": 1,
         },
     },
@@ -363,8 +307,6 @@ async def run_follow_ups():
         success = await send_followup(contact_data, message, channel)
         if success:
             await log_reminder_sent(contact_id, first_name, 0, f"followup_{product}_{stage_name[:15]}", today.strftime("%Y-%m"))
-            if stage_name == "Won":
-                await log_survey_sent(contact_id, first_name)
             sent += 1
             print(f"[FollowUp] ✅ Sent to {first_name} ({contact_id}) | {product} | {stage_name}")
         else:
