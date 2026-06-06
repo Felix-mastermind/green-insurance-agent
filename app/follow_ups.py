@@ -338,7 +338,7 @@ async def run_follow_ups(force: bool = False):
                     stage_time = stage_time.replace(tzinfo=timezone.utc)
                 days_in_stage = (datetime.now(ET).replace(tzinfo=None) - stage_time.replace(tzinfo=None)).days
                 required_days = stage_config.get("days", 1)
-                if days_in_stage < required_days:
+                if not force and days_in_stage < required_days:
                     skipped += 1
                     continue  # Not enough time has passed
             except Exception:
