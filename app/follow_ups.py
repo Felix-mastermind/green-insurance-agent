@@ -58,6 +58,16 @@ MESSAGES = {
             "en": "Hi {name}! Last follow-up from us about dental insurance. Whenever you need coverage, we're here. Have a great day!",
             "days": 2,
         },
+        "No answer 7-9 Allison": {
+            "es": "Hola {name}! Último mensaje de nuestra parte sobre el seguro dental. Si en algún momento necesitas cobertura dental, aquí estaremos. ¡Que tengas un excelente día!",
+            "en": "Hi {name}! Last follow-up from us about dental insurance. Whenever you need coverage, we're here. Have a great day!",
+            "days": 2,
+        },
+        "No answer 7-9 Fatima": {
+            "es": "Hola {name}! Último mensaje de nuestra parte sobre el seguro dental. Si en algún momento necesitas cobertura dental, aquí estaremos. ¡Que tengas un excelente día!",
+            "en": "Hi {name}! Last follow-up from us about dental insurance. Whenever you need coverage, we're here. Have a great day!",
+            "days": 2,
+        },
         "Reactivation - 60+ Days": {
             "es": "Hola {name}! Han pasado unos meses desde tu consulta sobre seguro dental. Tenemos nuevos planes disponibles. ¿Te interesa una cotización actualizada?",
             "en": "Hi {name}! It's been a while since you asked about dental insurance. We have new plans available. Interested in an updated quote?",
@@ -99,6 +109,16 @@ MESSAGES = {
         "No answer 7-9": {
             "es": "Hola {name}! Último intento de contacto sobre tu seguro de auto. Cuando estés listo, aquí estaremos. ¡Saludos de Green Insurance!",
             "en": "Hi {name}! Last follow-up on auto insurance. When you're ready, we're here. Best, Green Insurance!",
+            "days": 2,
+        },
+        "No Answer 7-9 Valeria": {
+            "es": "Hola {name}! Último intento de contacto sobre tu seguro de auto. Cuando estés listo, aquí estaremos. ¡Saludos de Green Insurance!",
+            "en": "Hi {name}! Last follow-up on auto insurance. When you're ready, we're here. Best, Green Insurance!",
+            "days": 2,
+        },
+        "Reactivation - 60+ Days": {
+            "es": "Hola {name}! Han pasado unos meses desde tu consulta sobre seguro de auto. Tenemos nuevas opciones disponibles. ¿Te interesa una cotización actualizada?",
+            "en": "Hi {name}! It's been a while since you asked about auto insurance. We have new options available. Interested in an updated quote?",
             "days": 2,
         },
         "Follow Up to Close": {
@@ -375,7 +395,7 @@ async def run_follow_ups(force: bool = False):
             channel = "WhatsApp"
 
         # Stages that trigger email in addition to WhatsApp/SMS
-        NO_ANSWER_STAGES = {"No answer 1-3", "No answer 4-6", "No answer 7-9"}
+        NO_ANSWER_STAGES = {"No answer 1-3", "No answer 4-6", "No answer 7-9", "No answer 7-9 Allison", "No answer 7-9 Fatima", "No Answer 7-9 Valeria"}
 
         # Send the follow-up
         success = await send_followup(contact_data, message, channel)
