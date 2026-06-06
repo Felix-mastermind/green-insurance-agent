@@ -67,6 +67,13 @@ Si quiere programar:
 "Que dia y hora te queda mejor? Estamos disponibles de lunes a viernes de 11am a 7pm."
 Cuando confirme el horario: "Listo! El [dia] a las [hora] un asesor te va a llamar. Hasta pronto!"
 
+PASO 3B - Cuando el cliente responde a un seguimiento mostrando interes:
+Pregunta: "Que bueno que estes interesado! Prefieres que un asesor te llame ahora o prefieres programar una cita?"
+
+Si quiere llamada: "Perfecto, en unos minutos un asesor te llamara."
+Si quiere cita: "Que dia y hora te queda mejor? Estamos disponibles de lunes a viernes 11am-7pm ET."
+Cuando confirme: "Listo, tu cita quedo agendada para el [dia] a las [hora]. Un asesor se comunicara contigo."
+
 PASO 4 - Transferir al asesor con toda la informacion recopilada.
 
 REGLAS:
@@ -130,12 +137,12 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         reply = "Entiendo, disculpa la molestia."
         await save_conversation_message(contact_id, "user", user_message)
         await save_conversation_message(contact_id, "assistant", reply)
-        return {"response": reply, "should_transfer": False, "intent": "wrong_number"}
+        return {"response": reply, "should_transfer": False, "intent": "wrong_number", "preferred_time": ""}
     if any(kw in msg_lower for kw in not_interested_keywords):
         reply = "Entendido, gracias por tu tiempo. Si en el futuro necesitas un seguro, aqui estaremos."
         await save_conversation_message(contact_id, "user", user_message)
         await save_conversation_message(contact_id, "assistant", reply)
-        return {"response": reply, "should_transfer": False, "intent": "not_interested"}
+        return {"response": reply, "should_transfer": False, "intent": "not_interested", "preferred_time": ""}
 
     # Detect language — if message contains common English words, respond in English
     english_indicators = [
@@ -165,8 +172,19 @@ IMPORTANT: The client is writing in English. Respond in English."
 
         # Detect intent from response
         intent = "general"
-        if any(w in msg_lower for w in ["cita", "appointment", "agendar", "schedule"]):
-            intent = "appointment"
+        preferred_time = ""
+        wants_call_kw = [
+            "llamar", "llamen", "call me", "call now", "ahora", "now",
+            "inmediato", "quiero que me llamen",
+        ]
+        wants_appt_kw = [
+            "cita", "appointment", "agendar", "schedule", "programar"
+        ]
+        if any(w in msg_lower for w in wants_call_kw):
+            intent = "wants_call"
+        elif any(w in msg_lower for w in wants_appt_kw):
+            intent = "wants_appointment"
+            preferred_time = user_message
         elif any(w in msg_lower for w in ["precio", "costo", "price", "cost", "cuanto"]):
             intent = "pricing"
         elif any(w in msg_lower for w in ["dental", "salud", "health", "auto", "vida", "life"]):
@@ -175,7 +193,8 @@ IMPORTANT: The client is writing in English. Respond in English."
         return {
             "response": ai_text,
             "should_transfer": should_transfer,
-            "intent": intent
+            "intent": intent,
+            "preferred_time": preferred_time,
         }
 
     except Exception as e:
@@ -187,5 +206,6 @@ IMPORTANT: The client is writing in English. Respond in English."
         return {
             "response": fallback,
             "should_transfer": True,
-            "intent": "error"
+            "intent": "error",
+            "preferred_time": "",
         }

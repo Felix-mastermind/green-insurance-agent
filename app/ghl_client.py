@@ -655,3 +655,97 @@ async def get_contact_pipeline(contact_id: str) -> tuple[str, str]:
         if name:
             return pid, name
     return "", ""
+
+BARBARA_CONTACT_ID = "Fr2WbOMJcsnKPC01S0Dz"
+
+AGENTS_CONTACTS = {
+    "RGSzf4hQ3OvSTYPcVaYT": "pagwWiwwr7OEGJP08bCc",   # Allison Herrera
+    "XIWNWHYdv3OzZ7EsHbCu": "Fr2WbOMJcsnKPC01S0Dz",   # Barbara Quintero
+    "crgvDrxKXD1o7ceciD6u": "mUef4ywsxG8deYKYioW5",   # Nancy Martinez
+    "6ElAdSHFu1hi0qopsDco": "oznzKcsK4X0cPyx0foii",    # Fatima Lopez
+    "axXwrCLjvTuDMBSiMoPa": "WGiwNgCRyB2dlUC7ipjj",   # Sharon Jones
+}
+
+AGENTS_CALENDARS = {
+    "RGSzf4hQ3OvSTYPcVaYT": "91JNjAkaA3SB1h8U5Dmu",   # Allison Herrera
+    "XIWNWHYdv3OzZ7EsHbCu": "M3pvKiMzqOxWak2yFEcw",   # Barbara Quintero
+    "6ElAdSHFu1hi0qopsDco": "NpNlS30qYFOWMUTUlMzE",   # Fatima Lopez
+}
+DEFAULT_CALENDAR_ID = "PydmDhNqVvTlKlaDTNtv"
+
+APPOINTMENT_BOOKED_STAGES = {
+    "BdzkOH5twVi9sCK2ag96": "8d04fdf3-04ae-4e77-a6b7-f0e6a0e220f8",  # Auto
+    # Dental y Life se agregan cuando se consigan los IDs
+}
+
+async def get_opportunity_assigned_user(contact_id: str) -> str:
+    """Get the userId assigned to the contact's opportunity"""
+    opportunities = await get_contact_opportunities(contact_id)
+    for opp in opportunities:
+        assigned = opp.get("assignedTo", "")
+        if assigned:
+            return assigned
+    return ""
+
+async def notify_advisor_call_requested(contact_id: str, contact_name: str, assigned_user_id: str, product: str = "") -> None:
+    """Notify assigned advisor + Barbara that client wants immediate call"""
+    msg = (f"📞 {contact_name} quiere que lo llamen ahora"
+           f"{' — seguro ' + product if product else ''}. "
+           f"Por favor llámalo lo antes posible.")
+
+    # Notify assigned advisor
+    advisor_contact_id = AGENTS_CONTACTS.get(assigned_user_id, "")
+    if advisor_contact_id:
+        await send_sms(advisor_contact_id, msg)
+
+    # Always notify Barbara
+    await send_sms(BARBARA_CONTACT_ID, msg)
+
+async def create_appointment(contact_id: str, contact_name: str, assigned_user_id: str,
+                              preferred_time_str: str, calendar_id: str = "") -> dict:
+    """Create a GHL appointment for the contact"""
+    from datetime import datetime, timedelta
+    import pytz
+
+    if not calendar_id:
+        calendar_id = AGENTS_CALENDARS.get(assigned_user_id, DEFAULT_CALENDAR_ID)
+
+    # Default to next business day 2pm ET if can't parse
+    ET = pytz.timezone("America/New_York")
+    now = datetime.now(ET)
+    # Simple: book 24h from now at 2pm ET
+    appt_time = now.replace(hour=14, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    if appt_time.weekday() >= 5:  # weekend → move to Monday
+        appt_time += timedelta(days=(7 - appt_time.weekday()))
+
+    start_time = appt_time.isoformat()
+    end_time = (appt_time + timedelta(hours=1)).isoformat()
+
+    body = {
+        "calendarId": calendar_id,
+        "locationId": os.getenv("GHL_LOCATION", ""),
+        "contactId": contact_id,
+        "startTime": start_time,
+        "endTime": end_time,
+        "title": f"Consulta de seguro — {contact_name}",
+        "appointmentStatus": "confirmed",
+        "assignedUserId": assigned_user_id,
+        "address": "Phone Call",
+    }
+    try:
+        return await request_ghl("POST", "/calendars/events/appointments", json=body)
+    except Exception as e:
+        logger.error("[GHL] Error creating appointment for %s: %s", contact_id, e)
+        return {}
+
+async def move_to_appointment_booked(contact_id: str) -> bool:
+    """Move contact's opportunity to Appointment Booked stage"""
+    opportunities = await get_contact_opportunities(contact_id)
+    moved = False
+    for opp in opportunities:
+        pipeline_id = opp.get("pipelineId", "")
+        stage_id = APPOINTMENT_BOOKED_STAGES.get(pipeline_id)
+        if stage_id:
+            await update_contact_stage(opp.get("id", ""), stage_id)
+            moved = True
+    return moved

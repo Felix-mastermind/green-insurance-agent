@@ -4,7 +4,7 @@ Receives events from GHL and processes them
 """
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, send_email, is_valid_email
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline
 from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
 
 router = APIRouter()
@@ -74,6 +74,30 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
     await log_message(contact_id, contact_name, "", channel.lower(),
                       "lead_response", response_text, status,
                       {"intent": ai_result.get("intent"), "transferred": should_transfer})
+
+    intent = ai_result.get("intent", "")
+
+    # Client wants immediate call
+    if intent == "wants_call":
+        assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
+        _, product = await get_contact_pipeline(contact_id)
+        await notify_advisor_call_requested(contact_id, contact_name, assigned_uid, product)
+        await move_to_hot_lead(contact_id)
+        print(f"[Webhook] {contact_name} wants call — HOT Lead + advisor notified")
+
+    # Client wants appointment
+    elif intent == "wants_appointment":
+        assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
+        appt = await create_appointment(contact_id, contact_name, assigned_uid, ai_result.get("preferred_time", ""))
+        if appt.get("id") or appt.get("appointmentId"):
+            await move_to_appointment_booked(contact_id)
+            _, product = await get_contact_pipeline(contact_id)
+            msg = f"Cita agendada con {contact_name}{' — ' + product if product else ''}. Revisa tu calendario."
+            advisor_contact_id = AGENTS_CONTACTS.get(assigned_uid, "")
+            if advisor_contact_id:
+                await send_sms(advisor_contact_id, msg)
+            await send_sms(BARBARA_CONTACT_ID, msg)
+            print(f"[Webhook] {contact_name} appointment booked — stage updated, advisor notified")
 
     # Handle wrong number
     if ai_result.get("intent") == "wrong_number":
