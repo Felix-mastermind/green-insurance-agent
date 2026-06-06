@@ -36,7 +36,7 @@ MESSAGES = {
         "New Lead": {
             "es": "Hola {name}! 😊 Te escribimos de Green Insurance. Vimos que estás interesado en un seguro dental. ¿Cuándo tienes unos minutos para que un asesor te llame?",
             "en": "Hi {name}! 😊 This is Green Insurance. We saw you're interested in dental insurance. When is a good time for one of our advisors to call you?",
-            "days": 1,
+            "days": 2,
         },
         "Contacted": {
             "es": "Hola {name}! Solo quería confirmar que recibiste la información sobre el seguro dental. ¿Tienes alguna pregunta para nuestro asesor?",
@@ -46,7 +46,7 @@ MESSAGES = {
         "No answer 1-3": {
             "es": "Hola {name}! Hemos intentado comunicarnos contigo sobre tu seguro dental. ¿Hay un mejor horario para llamarte? Estamos disponibles de L-V 11am-7pm.",
             "en": "Hi {name}! We've been trying to reach you about dental insurance. Is there a better time to call? We're available Mon-Fri 11am-7pm.",
-            "days": 1,
+            "days": 2,
         },
         "No answer 4-6": {
             "es": "Hola {name}! Seguimos aquí para ayudarte con tu seguro dental. Si prefieres, puedes escribirnos aquí mismo y un asesor te responde hoy.",
@@ -56,12 +56,12 @@ MESSAGES = {
         "No answer 7-9": {
             "es": "Hola {name}! Último mensaje de nuestra parte sobre el seguro dental. Si en algún momento necesitas cobertura dental, aquí estaremos. ¡Que tengas un excelente día!",
             "en": "Hi {name}! Last follow-up from us about dental insurance. Whenever you need coverage, we're here. Have a great day!",
-            "days": 3,
+            "days": 2,
         },
         "Reactivation - 60+ Days": {
             "es": "Hola {name}! Han pasado unos meses desde tu consulta sobre seguro dental. Tenemos nuevos planes disponibles. ¿Te interesa una cotización actualizada?",
             "en": "Hi {name}! It's been a while since you asked about dental insurance. We have new plans available. Interested in an updated quote?",
-            "days": 7,
+            "days": 2,
         },
         "Follow Up to Close": {
             "es": "Hola {name}! ¿Pudiste revisar las opciones de seguro dental? Podemos activar tu póliza esta semana. ¿Te llamo hoy?",
@@ -71,7 +71,7 @@ MESSAGES = {
         "Missed Appointment": {
             "es": "Hola {name}! Vimos que no pudiste asistir a tu cita. No hay problema, ¿cuándo te queda bien reagendar para tu seguro dental?",
             "en": "Hi {name}! We noticed you missed your appointment. No worries — when would you like to reschedule for your dental insurance?",
-            "days": 1,
+            "days": 2,
         },
     },
 
@@ -79,7 +79,7 @@ MESSAGES = {
         "New Lead": {
             "es": "Hola {name}! 🚗 Te escribimos de Green Insurance. Vimos que necesitas seguro de auto. ¿Tienes unos minutos para que un asesor te llame y te dé opciones?",
             "en": "Hi {name}! 🚗 This is Green Insurance. We saw you need auto insurance. Do you have a few minutes for an advisor to call you with options?",
-            "days": 1,
+            "days": 2,
         },
         "Contacted": {
             "es": "Hola {name}! Solo un seguimiento rápido sobre tu seguro de auto. ¿Ya tuviste oportunidad de revisar la información? ¿Alguna pregunta?",
@@ -89,7 +89,7 @@ MESSAGES = {
         "No answer 1-3": {
             "es": "Hola {name}! Hemos intentado contactarte sobre tu seguro de auto. ¿Hay un mejor momento para llamarte? Disponibles L-V 11am-7pm.",
             "en": "Hi {name}! We've tried reaching you about auto insurance. Is there a better time to call? Available Mon-Fri 11am-7pm.",
-            "days": 1,
+            "days": 2,
         },
         "No answer 4-6": {
             "es": "Hola {name}! Sabemos que estás ocupado. Si quieres info sobre tu seguro de auto, escríbenos aquí y te respondemos al momento.",
@@ -99,7 +99,7 @@ MESSAGES = {
         "No answer 7-9": {
             "es": "Hola {name}! Último intento de contacto sobre tu seguro de auto. Cuando estés listo, aquí estaremos. ¡Saludos de Green Insurance!",
             "en": "Hi {name}! Last follow-up on auto insurance. When you're ready, we're here. Best, Green Insurance!",
-            "days": 3,
+            "days": 2,
         },
         "Follow Up to Close": {
             "es": "Hola {name}! ¿Ya decidiste sobre tu seguro de auto? Podemos activar tu cobertura hoy mismo. ¿Te llamamos?",
@@ -109,7 +109,7 @@ MESSAGES = {
         "Missed Appointment": {
             "es": "Hola {name}! No pudiste asistir a tu cita para el seguro de auto. ¿Cuándo te queda bien reagendar?",
             "en": "Hi {name}! You missed your auto insurance appointment. When can we reschedule?",
-            "days": 1,
+            "days": 2,
         },
         "Quoted": {
             "es": "Hola {name}! ¿Pudiste revisar la cotización de tu seguro de auto? Estamos para resolver cualquier duda antes de que tomes tu decisión.",
@@ -122,7 +122,7 @@ MESSAGES = {
         "New Leads": {
             "es": "Hola {name}! 🌿 Te escribimos de Green Insurance. Vimos que estás interesado en seguro de vida. Es una decisión importante — ¿cuándo puedo conectarte con un asesor?",
             "en": "Hi {name}! 🌿 This is Green Insurance. We saw you're interested in life insurance. It's an important decision — when can I connect you with an advisor?",
-            "days": 1,
+            "days": 2,
         },
         "Contacted": {
             "es": "Hola {name}! Seguimiento sobre tu seguro de vida. ¿Tuviste oportunidad de revisar la información? ¿Tienes preguntas?",
@@ -132,7 +132,7 @@ MESSAGES = {
         "No answer 1-3": {
             "es": "Hola {name}! Hemos intentado comunicarnos sobre tu seguro de vida. ¿Hay un mejor horario para llamarte?",
             "en": "Hi {name}! We've been trying to reach you about life insurance. Is there a better time to call?",
-            "days": 1,
+            "days": 2,
         },
         "No answer 4-6": {
             "es": "Hola {name}! Seguimos disponibles para ayudarte con tu seguro de vida. Escríbenos aquí cuando gustes.",
@@ -142,12 +142,12 @@ MESSAGES = {
         "No answer 7-9": {
             "es": "Hola {name}! Último mensaje sobre tu seguro de vida. Cuando estés listo para proteger a tu familia, aquí estaremos.",
             "en": "Hi {name}! Last message about life insurance. When you're ready to protect your family, we're here.",
-            "days": 3,
+            "days": 2,
         },
         "HOT Leads": {
             "es": "Hola {name}! Un asesor de Green Insurance te llamará muy pronto para ayudarte con tu seguro de vida. ¿Hay algún horario que prefieras?",
             "en": "Hi {name}! A Green Insurance advisor will call you very soon about your life insurance. Is there a preferred time?",
-            "days": 1,
+            "days": 2,
         },
         "Follow Up to Close": {
             "es": "Hola {name}! ¿Pudiste pensar en las opciones de seguro de vida? Podemos activar tu póliza esta semana. ¿Hablamos hoy?",
@@ -157,7 +157,7 @@ MESSAGES = {
         "Missed Appointment": {
             "es": "Hola {name}! No pudiste asistir a tu cita para el seguro de vida. ¿Cuándo podemos reagendar?",
             "en": "Hi {name}! You missed your life insurance appointment. When can we reschedule?",
-            "days": 1,
+            "days": 2,
         },
     },
 }
