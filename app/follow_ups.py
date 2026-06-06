@@ -6,7 +6,7 @@ Reviews leads by stage in active pipelines and sends product-specific follow-up 
 import pytz
 from datetime import datetime, timedelta
 from app.ghl_client import (
-    get_opportunities, get_pipelines, send_whatsapp, send_sms,
+    get_opportunities, get_pipelines, send_whatsapp, send_sms, send_email, is_valid_email,
     get_contact, add_contact_tag, create_task, get_contact_channel
 )
 from app.supabase_client import check_reminder_sent, log_reminder_sent
@@ -305,9 +305,24 @@ async def run_follow_ups():
         except Exception:
             channel = "WhatsApp"
 
+        # Stages that trigger email in addition to WhatsApp/SMS
+        NO_ANSWER_STAGES = {"No answer 1-3", "No answer 4-6", "No answer 7-9"}
+
         # Send the follow-up
         success = await send_followup(contact_data, message, channel)
         if success:
+            # Also send email if contact has valid email and is in a No Answer stage
+            if stage_name in NO_ANSWER_STAGES:
+                email = contact_data.get("email", "") or ""
+                if email and is_valid_email(email):
+                    try:
+                        subject = f"Green Insurance - Seguimiento de tu solicitud de seguro {product}"
+                        await send_email(contact_id, subject, message)
+                        print(f"[FollowUp] 📧 Email sent to {first_name} ({email}) | {stage_name}")
+                    except Exception as e:
+                        print(f"[FollowUp] 📧 Email failed for {first_name}: {e}")
+                elif email:
+                    print(f"[FollowUp] 📧 Invalid email for {first_name}: {email} — skipped")
             await log_reminder_sent(contact_id, first_name, 0, f"followup_{product}_{stage_name[:15]}", today.strftime("%Y-%m"))
             sent += 1
             print(f"[FollowUp] ✅ Sent to {first_name} ({contact_id}) | {product} | {stage_name}")
