@@ -43,7 +43,6 @@ async def handle_survey_response(contact_id: str, contact_name: str, score: int,
             await send_sms(contact_id, msg)
         else:
             await send_whatsapp(contact_id, msg)
-        )
         barbara_msg = (f"⚠️ Alerta: El cliente {contact_name} calificó el servicio con {score}/5. "
                        f"Por favor verifica el caso.")
         await send_sms(BARBARA_CONTACT_ID, barbara_msg)

@@ -48,8 +48,6 @@ async def lifespan(app: FastAPI):
     for route in registered_routes():
         print(f"[Route] {','.join(route['methods'])} {route['path']} -> {route['name']}")
 
-        replace_existing=True
-    )
 
     # Renewal reminders - daily at 10:00am ET
     scheduler.add_job(
