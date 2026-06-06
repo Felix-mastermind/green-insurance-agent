@@ -346,7 +346,7 @@ async def run_follow_ups(force: bool = False):
 
         # Check if already sent today
         followup_key = get_followup_key(now, contact_id, stage_name)
-        already_sent = await check_reminder_sent(contact_id, f"followup_{product}_{stage_name[:15]}", today.strftime("%Y-%m"))
+        already_sent = await check_reminder_sent(contact_id, f"followup_{product}_{stage_name[:15]}", today.strftime("%Y-%m-%d"))
         if already_sent:
             skipped += 1
             continue
@@ -392,7 +392,7 @@ async def run_follow_ups(force: bool = False):
                         print(f"[FollowUp] 📧 Email failed for {first_name}: {e}")
                 elif email:
                     print(f"[FollowUp] 📧 Invalid email for {first_name}: {email} — skipped")
-            await log_reminder_sent(contact_id, first_name, 0, f"followup_{product}_{stage_name[:15]}", today.strftime("%Y-%m"))
+            await log_reminder_sent(contact_id, first_name, 0, f"followup_{product}_{stage_name[:15]}", today.strftime("%Y-%m-%d"))
             sent += 1
             print(f"[FollowUp] ✅ Sent to {first_name} ({contact_id}) | {product} | {stage_name}")
         else:
