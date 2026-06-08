@@ -2,40 +2,12 @@
 GHL Webhook Handler
 Receives events from GHL and processes them
 """
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
 from app.scheduler import scheduler, ET
 from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline
 from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
-
-ET = pytz.timezone("America/New_York")
-BUSINESS_HOURS_START = 9   # 9:00 AM ET
-BUSINESS_HOURS_END   = 18  # 6:00 PM ET
-BUSINESS_DAYS        = {0, 1, 2, 3, 4}  # Lunes a Viernes
-
-
-def is_business_hours() -> bool:
-    """Retorna True si es horario de oficina: L-V 9am-6pm ET."""
-    now = datetime.now(ET)
-    return now.weekday() in BUSINESS_DAYS and BUSINESS_HOURS_START <= now.hour < BUSINESS_HOURS_END
-
-
-def next_business_opening() -> str:
-    """Retorna el próximo horario de apertura como string legible, ej: 'mañana a las 9:00 AM'."""
-    now = datetime.now(ET)
-    candidate = now.replace(hour=BUSINESS_HOURS_START, minute=0, second=0, microsecond=0)
-
-    # Si ya pasó la hora de apertura hoy, ir al día siguiente
-    if now >= candidate:
-        candidate += timedelta(days=1)
-
-    # Avanzar hasta el próximo día hábil
-    while candidate.weekday() not in BUSINESS_DAYS:
-        candidate += timedelta(days=1)
-
-    days_diff = (candidate.date() - now.date()).days
-    day_label = "mañana" if days_diff == 1 else candidate.strftime("%A")
-    return f"{day_label} a las {candidate.strftime('%I:%M %p').lstrip('0')} ET"
 
 router = APIRouter()
 
@@ -51,14 +23,13 @@ AGENTS = {
 BARBARA_CONTACT_ID = "Fr2WbOMJcsnKPC01S0Dz"
 REVIEW_LINK = "https://share.google/07auFx6a4aT7D7ht6"
 
-from datetime import datetime, timedelta
-
 BUSINESS_HOURS_START = 11  # 11:00 AM ET
 BUSINESS_HOURS_END   = 19  # 7:00 PM ET
 BUSINESS_DAYS        = {0, 1, 2, 3, 4}  # Lunes a Viernes
 
 
 def is_business_hours() -> bool:
+    """Retorna True si es L-V 11am-7pm ET."""
     now = datetime.now(ET)
     return now.weekday() in BUSINESS_DAYS and BUSINESS_HOURS_START <= now.hour < BUSINESS_HOURS_END
 
