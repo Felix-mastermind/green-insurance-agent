@@ -153,9 +153,7 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     is_english = any(ind in f" {msg_lower} " for ind in english_indicators)
     system_prompt = SYSTEM_PROMPT_ES
     if is_english:
-        system_prompt = SYSTEM_PROMPT_ES + "
-
-IMPORTANT: The client is writing in English. Respond in English."
+        system_prompt = SYSTEM_PROMPT_ES + "\n\nIMPORTANT: The client is writing in English. Respond in English."
 
     try:
         response = get_client().messages.create(
