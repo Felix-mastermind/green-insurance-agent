@@ -76,6 +76,13 @@ Cuando confirme: "Listo, tu cita quedo agendada para el [dia] a las [hora]. Un a
 
 PASO 4 - Transferir al asesor con toda la informacion recopilada.
 
+PASO 3 FUERA DE HORARIO (se activa solo cuando el sistema indica HORARIO: FUERA DE OFICINA):
+Una vez que tengas los datos del paso 2, di EXACTAMENTE:
+"Ya tenemos tus datos! Nuestros asesores estan disponibles manana de 11am a 7pm ET. A que hora te queda mejor para que te llamemos?"
+
+Cuando el cliente confirme una hora, di EXACTAMENTE:
+"Perfecto! Manana a las [hora confirmada] un asesor de Green Insurance te va a llamar. Hasta pronto!"
+
 REGLAS:
 - NUNCA preguntes por presupuesto ni des precios.
 - NUNCA des informacion tecnica de coberturas.
@@ -87,7 +94,7 @@ REGLAS:
 
 Green Insurance - Marietta, GA 30060 | L-V 11am-7pm ET"""
 
-async def get_ai_response(contact_id: str, user_message: str, contact_name: str = "") -> dict:
+async def get_ai_response(contact_id: str, user_message: str, contact_name: str = "", business_hours: bool = True) -> dict:
     """
     Get AI response for a lead message
     Returns: {"response": str, "should_transfer": bool, "intent": str}
@@ -152,8 +159,12 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     ]
     is_english = any(ind in f" {msg_lower} " for ind in english_indicators)
     system_prompt = SYSTEM_PROMPT_ES
+
+    # Inyectar contexto de horario para que el AI sepa cómo cerrar
+    if not business_hours:
+        system_prompt += "\n\nHORARIO: FUERA DE OFICINA — Aplica el PASO 3 FUERA DE HORARIO. No digas que un asesor llamara ahora. Pide la hora preferida para manana."
     if is_english:
-        system_prompt = SYSTEM_PROMPT_ES + "\n\nIMPORTANT: The client is writing in English. Respond in English."
+        system_prompt += "\n\nIMPORTANT: The client is writing in English. Respond in English."
 
     try:
         response = get_client().messages.create(

@@ -2,10 +2,9 @@
 GHL Webhook Handler
 Receives events from GHL and processes them
 """
-from datetime import datetime, timedelta
-import pytz
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
+from app.scheduler import scheduler, ET
 from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline
 from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
 
@@ -52,6 +51,44 @@ AGENTS = {
 BARBARA_CONTACT_ID = "Fr2WbOMJcsnKPC01S0Dz"
 REVIEW_LINK = "https://share.google/07auFx6a4aT7D7ht6"
 
+from datetime import datetime, timedelta
+
+BUSINESS_HOURS_START = 11  # 11:00 AM ET
+BUSINESS_HOURS_END   = 19  # 7:00 PM ET
+BUSINESS_DAYS        = {0, 1, 2, 3, 4}  # Lunes a Viernes
+
+
+def is_business_hours() -> bool:
+    now = datetime.now(ET)
+    return now.weekday() in BUSINESS_DAYS and BUSINESS_HOURS_START <= now.hour < BUSINESS_HOURS_END
+
+
+def next_business_opening() -> datetime:
+    """Retorna el datetime del próximo inicio de horario hábil (11am ET)."""
+    now = datetime.now(ET)
+    candidate = now.replace(hour=BUSINESS_HOURS_START, minute=0, second=0, microsecond=0)
+    if now >= candidate:
+        candidate += timedelta(days=1)
+    while candidate.weekday() not in BUSINESS_DAYS:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+async def send_advisor_next_day_reminder(advisor_contact_id: str, advisor_uid: str,
+                                          contact_name: str, contact_id: str,
+                                          preferred_time: str, product: str):
+    """Envía texto al asesor recordándole que debe llamar al lead."""
+    ghl_link = f"https://app.gohighlevel.com/contacts/{contact_id}"
+    product_str = f" | Seguro: {product}" if product else ""
+    time_str = f" a las {preferred_time}" if preferred_time else " en el horario acordado"
+    msg = (
+        f"📞 Recordatorio de llamada: {contact_name}{time_str}{product_str}. "
+        f"El cliente agendó llamada para hoy. Ver lead: {ghl_link}"
+    )
+    await send_sms(advisor_contact_id, msg)
+    await send_sms(BARBARA_CONTACT_ID, msg)
+    print(f"[Reminder] Sent next-day reminder for {contact_name} to advisor {advisor_uid}")
+
 
 async def handle_survey_response(contact_id: str, contact_name: str, score: int, channel: str):
     """Handle a 1-5 survey response from a Won contact"""
@@ -89,8 +126,9 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
     if msg_stripped in ("1", "2", "3", "4", "5") and await check_survey_pending(contact_id):
         await handle_survey_response(contact_id, contact_name, int(msg_stripped), channel)
         return
-    # Get AI response
-    ai_result = await get_ai_response(contact_id, message, contact_name)
+    # Get AI response — pasar si es horario hábil para ajustar el mensaje de cierre
+    in_hours = is_business_hours()
+    ai_result = await get_ai_response(contact_id, message, contact_name, business_hours=in_hours)
     response_text = ai_result["response"]
     should_transfer = ai_result["should_transfer"]
 
@@ -118,7 +156,8 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
     # Client wants appointment
     elif intent == "wants_appointment":
         assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
-        appt = await create_appointment(contact_id, contact_name, assigned_uid, ai_result.get("preferred_time", ""))
+        preferred_time = ai_result.get("preferred_time", "")
+        appt = await create_appointment(contact_id, contact_name, assigned_uid, preferred_time)
         if appt.get("id") or appt.get("appointmentId"):
             await move_to_appointment_booked(contact_id)
             _, product = await get_contact_pipeline(contact_id)
@@ -126,12 +165,29 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
             phone = (contact_info or {}).get("phone", "") or ""
             phone_str = " | Tel: " + phone if phone else ""
             product_str = " | Seguro: " + product if product else ""
-            msg = f"📅 Cita agendada | Lead: {contact_name}{phone_str}{product_str}. Revisa tu calendario."
             advisor_contact_id = AGENTS_CONTACTS.get(assigned_uid, "")
-            if advisor_contact_id:
-                await send_sms(advisor_contact_id, msg)
-            await send_sms(BARBARA_CONTACT_ID, msg)
-            print(f"[Webhook] {contact_name} appointment booked — stage updated, advisor notified")
+
+            if in_hours:
+                # Dentro de horario: notificar al asesor de inmediato
+                msg = f"📅 Cita agendada | Lead: {contact_name}{phone_str}{product_str}. Revisa tu calendario."
+                if advisor_contact_id:
+                    await send_sms(advisor_contact_id, msg)
+                await send_sms(BARBARA_CONTACT_ID, msg)
+                print(f"[Webhook] {contact_name} appointment booked (in hours) — advisor notified now")
+            else:
+                # Fuera de horario: programar recordatorio al asesor para el día siguiente a las 11am ET
+                reminder_time = next_business_opening()
+                job_id = f"reminder_{contact_id}_{int(reminder_time.timestamp())}"
+                scheduler.add_job(
+                    send_advisor_next_day_reminder,
+                    "date",
+                    run_date=reminder_time,
+                    id=job_id,
+                    replace_existing=True,
+                    args=[advisor_contact_id or BARBARA_CONTACT_ID, assigned_uid,
+                          contact_name, contact_id, preferred_time, product or ""],
+                )
+                print(f"[Webhook] {contact_name} appointment booked (out of hours) — reminder scheduled for {reminder_time.strftime('%Y-%m-%d %I:%M %p ET')}")
 
     # Handle wrong number
     if ai_result.get("intent") == "wrong_number":
@@ -152,26 +208,24 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         print(f"[Webhook] Not interested: {contact_name} — moved to Not Interested stage")
 
     elif should_transfer:
-        if is_business_hours():
+        if in_hours:
+            # Dentro de horario: avisar que el asesor llama pronto
             transfer_msg = ("Un asesor de Green Insurance se comunicara contigo en breve. "
                             "Gracias por tu paciencia!")
+            if channel == "SMS":
+                await send_sms(contact_id, transfer_msg)
+            else:
+                await send_whatsapp(contact_id, transfer_msg)
+            moved = await move_to_hot_lead(contact_id)
+            await add_contact_tag(contact_id, "necesita-asesor")
+            print(f"[Webhook] Transfer (in hours) for {contact_name} — HOT Lead: {moved}")
         else:
-            opening = next_business_opening()
-            transfer_msg = (
-                f"Gracias por tu informacion! Nuestros asesores estan disponibles "
-                f"de lunes a viernes de 9am a 6pm ET. "
-                f"Un asesor te contactara {opening}. Que tengas un excelente dia! 🌿"
-            )
-        if channel == "SMS":
-            await send_sms(contact_id, transfer_msg)
-        else:
-            await send_whatsapp(contact_id, transfer_msg)
-        intent_label = ai_result.get("intent", "general")
-        # Move opportunity to HOT Leads stage in GHL pipeline
-        moved = await move_to_hot_lead(contact_id)
-        # Create task for the assigned agent
-        await add_contact_tag(contact_id, "necesita-asesor")
-        print(f"[Webhook] Transfer for {contact_name} — {'business hours' if is_business_hours() else 'out of hours'} — moved to HOT Leads: {moved}")
+            # Fuera de horario: el AI ya le pidió la hora preferida para mañana.
+            # No mandamos mensaje extra aquí — esperamos que el cliente responda con la hora.
+            # Solo marcamos como HOT Lead para que el asesor lo vea.
+            moved = await move_to_hot_lead(contact_id)
+            await add_contact_tag(contact_id, "llamar-manana")
+            print(f"[Webhook] Transfer (out of hours) for {contact_name} — waiting for preferred time")
 
 def extract_message_body(payload: dict) -> str:
     """Extract message text from various GHL payload formats"""

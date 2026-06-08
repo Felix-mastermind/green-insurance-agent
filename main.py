@@ -6,11 +6,10 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-import pytz
 import asyncio
 from contextlib import asynccontextmanager
+from app.scheduler import scheduler, ET
 
 from app.webhook_handler import router as webhook_router
 from app.supervisor import router as supervisor_router
@@ -26,8 +25,6 @@ from app.ghl_client import (
     verify_location,
 )
 
-ET = pytz.timezone("America/New_York")
-scheduler = AsyncIOScheduler(timezone=ET)
 
 def registered_routes() -> list:
     routes = []
