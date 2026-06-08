@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
 from app.scheduler import scheduler, ET
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities
 from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
 
 router = APIRouter()
@@ -59,6 +59,28 @@ async def send_advisor_next_day_reminder(advisor_contact_id: str, advisor_uid: s
     await send_sms(advisor_contact_id, msg)
     await send_sms(BARBARA_CONTACT_ID, msg)
     print(f"[Reminder] Sent next-day reminder for {contact_name} to advisor {advisor_uid}")
+
+
+async def is_new_lead_stage(contact_id: str) -> bool:
+    """
+    Retorna True si la oportunidad del contacto está en 'New Lead'.
+    En ese caso el bot no responde — deja que la automatización de GHL
+    y el asesor hagan las 3 llamadas y muevan el lead a 'Contacted'.
+    """
+    opportunities = await get_contact_opportunities(contact_id)
+    for opp in opportunities:
+        # GHL puede devolver el nombre del stage en distintos campos
+        pipeline_stage = opp.get("pipelineStage") or {}
+        stage_name = (
+            pipeline_stage.get("name", "")
+            if isinstance(pipeline_stage, dict)
+            else str(pipeline_stage)
+        )
+        if not stage_name:
+            stage_name = opp.get("stageName", "") or ""
+        if "new lead" in stage_name.lower():
+            return True
+    return False
 
 
 async def handle_survey_response(contact_id: str, contact_name: str, score: int, channel: str):
@@ -304,6 +326,13 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
             if await human_agent_active(contact_id):
                 print(f"[Webhook] SKIPPED — human agent is active for {contact_name} ({contact_id})")
                 return {"status": "ok", "event": "skipped_human_active"}
+
+            # STOP bot if lead is still in "New Lead" stage —
+            # let GHL automation run + advisor calls 3 times first.
+            # Bot only kicks in once advisor moves lead to "Contacted" or beyond.
+            if await is_new_lead_stage(contact_id):
+                print(f"[Webhook] SKIPPED — {contact_name} ({contact_id}) is in 'New Lead' stage, bot stays silent")
+                return {"status": "ok", "event": "skipped_new_lead"}
 
             # Get the real channel from GHL conversation
             channel = await get_contact_channel(contact_id)
