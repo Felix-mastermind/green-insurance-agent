@@ -209,3 +209,55 @@ IMPORTANT: The client is writing in English. Respond in English."
             "intent": "error",
             "preferred_time": "",
         }
+
+
+FOLLOWUP_SYSTEM_PROMPT = """Eres el asistente virtual de Green Insurance, agencia de seguros en Georgia, USA.
+
+Tu tarea: generar UN mensaje de seguimiento para un lead que no ha respondido.
+
+REGLAS ESTRICTAS:
+- Solo texto plano. Sin asteriscos, guiones, listas ni negritas.
+- Maximo 2 oraciones.
+- NUNCA repitas lo que ya dijiste en mensajes anteriores.
+- Continua naturalmente el hilo de la conversacion.
+- Si no hay historial, saluda y pregunta por disponibilidad.
+- Termina siempre con una pregunta o invitacion a responder.
+- NUNCA menciones precios ni presupuestos.
+- El seguro en cuestion es: {product}. Mantente enfocado en ese producto."""
+
+
+async def get_ai_followup(contact_id: str, product: str, stage_name: str, contact_name: str = "", lang: str = "es") -> str:
+    """
+    Generate a contextual follow-up message based on conversation history.
+    Used by follow_ups.py for dynamic, non-repeating messages.
+    Returns the message text, or empty string on failure.
+    """
+    try:
+        history = await get_conversation_history(contact_id, limit=10)
+
+        system = FOLLOWUP_SYSTEM_PROMPT.format(product=product)
+        if lang == "en":
+            system += "\n\nIMPORTANT: Respond in English."
+
+        messages = []
+        for msg in history:
+            role = msg["role"] if msg["role"] in ["user", "assistant"] else "user"
+            messages.append({"role": role, "content": msg["content"]})
+
+        name_hint = f" El nombre del cliente es {contact_name}." if contact_name else ""
+        prompt = (
+            f"El lead lleva dias sin responder y esta en el stage '{stage_name}' del pipeline de seguro de {product}."
+            f"{name_hint} Genera un mensaje de seguimiento corto, diferente a los anteriores, que continue el hilo natural de la conversacion."
+        )
+        messages.append({"role": "user", "content": prompt})
+
+        response = get_client().messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            system=system,
+            messages=messages,
+        )
+        return response.content[0].text.strip()
+    except Exception as e:
+        print(f"[FollowUp AI] Error generating followup for {contact_id}: {e}")
+        return ""

@@ -9,7 +9,8 @@ from app.ghl_client import (
     get_opportunities, get_pipelines, send_whatsapp, send_sms, send_email, is_valid_email,
     get_contact, add_contact_tag, create_task, get_contact_channel
 )
-from app.supabase_client import check_reminder_sent, log_reminder_sent
+from app.supabase_client import check_reminder_sent, log_reminder_sent, get_conversation_history
+from app.claude_agent import get_ai_followup
 
 ET = pytz.timezone("America/New_York")
 
@@ -127,6 +128,7 @@ MESSAGES = {
             "en": "Hi {name}! You missed your auto insurance appointment. When can we reschedule?",
             "days": 2,
         },
+        "HOT Leads": {"dynamic": True, "days": 2},
         "Quoted": {
             "es": "Hola {name}! Pudiste revisar la cotizacion de tu seguro de auto? Estamos para resolver cualquier duda antes de que tomes tu decision.",
             "en": "Hi {name}! Were you able to review your auto insurance quote? We are here to answer any questions before you decide.",
@@ -523,13 +525,24 @@ async def run_follow_ups(force: bool = False):
             lang = detect_language(contact_data, stage_name)
             first_name = contact_data.get("firstName", "") or contact_data.get("first_name", "Hola")
             template = stage_config.get(lang, stage_config.get("es", ""))
-            if not template:
+            is_dynamic = stage_config.get("dynamic", False)
+            if not template and not is_dynamic:
                 continue
-
-            message = template.format(name=first_name)
+            message = template.format(name=first_name) if template else ""
             followup_key_to_log = f"followup_{product}_{stage_name[:15]}"
             log_period = today.strftime("%Y-%m-%d")
-
+        # Use AI to generate contextual message if history exists, or stage is dynamic (required for dynamic stages)
+        is_stage_dynamic = stage_config.get("dynamic", False)
+        conv_history = await get_conversation_history(contact_id, limit=5)
+        if conv_history or is_stage_dynamic:
+            ai_msg = await get_ai_followup(contact_id, product, stage_name, first_name, lang)
+            if ai_msg:
+                message = ai_msg
+                print(f"[FollowUp] AI message for {first_name} | {product} | {stage_name}")
+            elif not message:
+                print(f"[FollowUp] AI failed and no template for {first_name} | {stage_name} -- skipping")
+                skipped += 1
+                continue
         try:
             channel = await get_contact_channel(contact_id)
         except Exception:
