@@ -220,16 +220,22 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         wants_appt_kw = [
             "cita", "appointment", "agendar", "schedule", "programar"
         ]
-        # Also detect appointment confirmation from AI response
+        # Detect appointment confirmation ONLY from specific phrases in AI response
+        # (must be unambiguous — avoid short words like "listo" that appear in many contexts)
         appt_confirmed_kw = [
             "quedo agendada", "quedó agendada", "cita agendada", "appointment booked",
-            "listo", "agendado", "te va a llamar", "te llamara", "will call you",
+            "agendado para el", "te va a llamar el", "te llamara el",
         ]
         ai_lower = ai_text.lower()
 
         if any(w in msg_lower for w in wants_call_kw):
             intent = "wants_call"
-        elif any(w in msg_lower for w in wants_appt_kw) or any(w in ai_lower for w in appt_confirmed_kw):
+        elif any(w in msg_lower for w in wants_appt_kw) or (
+                any(w in ai_lower for w in appt_confirmed_kw) and
+                any(w in msg_lower for w in ["lunes","martes","miércoles","miercoles","jueves",
+                                              "viernes","manana","mañana","monday","tuesday",
+                                              "wednesday","thursday","friday","tomorrow",
+                                              "am","pm",":"])):
             intent = "wants_appointment"
             preferred_time = user_message
         elif any(w in msg_lower for w in ["precio", "costo", "price", "cost", "cuanto"]):
