@@ -219,11 +219,11 @@ LIFE_SEBASTIAN_NO_ANSWER = {
     "No answer 1-3": {
         "messages": [
             {
-                "es": "Hola {name}! Te escribimos de Green Insurance. Hace un tiempo mostraste interes en un seguro de vida, sigues con tu cobertura actual o ha cambiado algo en tu situacion?",
+                "es": "Hola {name}! Te escribimos de Green Insurance. Hace un tiempo mostraste interes en un seguro de vida, sigues con tu cobertura de vida actual o ha cambiado algo en tu situacion?",
                 "en": "Hi {name}! This is Green Insurance. A while back you showed interest in life insurance, do you still have your current coverage, or has anything changed?",
             },
             {
-                "es": "Hola {name}! Seguimos aqui de Green Insurance. Si tu situacion familiar ha cambiado o quieres revisar tu cobertura actual, un asesor puede ayudarte sin compromiso. Tienes unos minutos?",
+                "es": "Hola {name}! Seguimos aqui de Green Insurance. Si tu situacion familiar ha cambiado o quieres revisar tu cobertura de vida actual, un asesor puede ayudarte sin compromiso. Tienes unos minutos?",
                 "en": "Hi {name}! Green Insurance here. If your family situation has changed or you want to review your current coverage, an advisor can help with no obligation. Do you have a few minutes?",
             },
             {
@@ -244,7 +244,7 @@ LIFE_SEBASTIAN_NO_ANSWER = {
                 "en": "Hi {name}! Did you know many people with older life policies can get better coverage at the same price today? We can review your situation with no obligation.",
             },
             {
-                "es": "Hola {name}! Seguimos disponibles si quieres comparar tu cobertura actual con lo que podemos ofrecerte. Sin prisa, escribenos cuando gustes.",
+                "es": "Hola {name}! Seguimos disponibles si quieres comparar tu cobertura de vida actual con lo que podemos ofrecerte. Sin prisa, escribenos cuando gustes.",
                 "en": "Hi {name}! We are still here if you would like to compare your current coverage with what we can offer. No rush, message us whenever you are ready.",
             },
         ],
