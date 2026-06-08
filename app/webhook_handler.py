@@ -141,14 +141,13 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
 
     intent = ai_result.get("intent", "")
 
-    # Client wants immediate call
+    # ── Single intent chain — only ONE branch fires ──────────────────────────
     if intent == "wants_call":
         assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
         await notify_advisor_call_requested(contact_id, contact_name, assigned_uid, product)
         await move_to_hot_lead(contact_id)
         print(f"[Webhook] {contact_name} wants call — HOT Lead + advisor notified")
 
-    # Client wants appointment
     elif intent == "wants_appointment":
         assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
         preferred_time = ai_result.get("preferred_time", "")
@@ -160,16 +159,13 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
             phone_str = " | Tel: " + phone if phone else ""
             product_str = " | Seguro: " + product if product else ""
             advisor_contact_id = AGENTS_CONTACTS.get(assigned_uid, "")
-
             if in_hours:
-                # Dentro de horario: notificar al asesor de inmediato
                 msg = f"📅 Cita agendada | Lead: {contact_name}{phone_str}{product_str}. Revisa tu calendario."
                 if advisor_contact_id:
                     await send_sms(advisor_contact_id, msg)
                 await send_sms(BARBARA_CONTACT_ID, msg)
-                print(f"[Webhook] {contact_name} appointment booked (in hours) — advisor notified now")
+                print(f"[Webhook] {contact_name} appointment booked (in hours) — advisor notified")
             else:
-                # Fuera de horario: programar recordatorio al asesor para el día siguiente a las 11am ET
                 reminder_time = next_business_opening()
                 job_id = f"reminder_{contact_id}_{int(reminder_time.timestamp())}"
                 scheduler.add_job(
@@ -181,29 +177,26 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
                     args=[advisor_contact_id or BARBARA_CONTACT_ID, assigned_uid,
                           contact_name, contact_id, preferred_time, product or ""],
                 )
-                print(f"[Webhook] {contact_name} appointment booked (out of hours) — reminder scheduled for {reminder_time.strftime('%Y-%m-%d %I:%M %p ET')}")
+                print(f"[Webhook] {contact_name} appointment booked (out of hours) — reminder at {reminder_time.strftime('%Y-%m-%d %I:%M %p ET')}")
 
-    # Handle wrong number
-    if ai_result.get("intent") == "wrong_number":
-        moved = await move_to_wrong_number(contact_id)
+    elif intent == "wrong_number":
+        await move_to_wrong_number(contact_id)
         contact_data = await get_contact(contact_id)
         email = (contact_data or {}).get("email", "")
         if email and is_valid_email(email):
             subject = "Green Insurance - Verificacion de contacto"
             body = f"Hola, recibimos un mensaje indicando que este numero no corresponde a {contact_name}. Si esto es un error, por favor contactenos. Green Insurance - Marietta, GA"
             await send_email(contact_id, subject, body)
-            print(f"[Webhook] Wrong number for {contact_name} — moved to stage, email sent to {email}")
+            print(f"[Webhook] Wrong number for {contact_name} — moved, email sent to {email}")
         else:
-            print(f"[Webhook] Wrong number for {contact_name} — moved to stage, no valid email")
+            print(f"[Webhook] Wrong number for {contact_name} — moved, no valid email")
 
-    # Handle already insured
-    elif ai_result.get("intent") == "already_insured":
+    elif intent == "already_insured":
         await move_to_already_insured(contact_id)
         print(f"[Webhook] Already insured: {contact_name} — moved to Already Insured stage")
 
-    # Handle cross-sell: client in one pipeline asks about a different product
-    elif ai_result.get("intent") == "cross_sell":
-        target_product = ai_result.get("preferred_time", "")  # product type detected
+    elif intent == "cross_sell":
+        target_product = ai_result.get("preferred_time", "")
         pipeline_info = CROSS_SELL_PIPELINES.get(target_product)
         if pipeline_info:
             new_pipeline_id, new_stage_id = pipeline_info
@@ -223,14 +216,12 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         else:
             print(f"[Webhook] Cross-sell detected but no pipeline found for '{target_product}'")
 
-    # Handle not interested
-    elif ai_result.get("intent") == "not_interested":
+    elif intent == "not_interested":
         await move_to_not_interested(contact_id)
         print(f"[Webhook] Not interested: {contact_name} — moved to Not Interested stage")
 
     elif should_transfer:
         if in_hours:
-            # Dentro de horario: avisar que el asesor llama pronto
             transfer_msg = ("Un asesor de Green Insurance se comunicara contigo en breve. "
                             "Gracias por tu paciencia!")
             if channel == "SMS":
@@ -241,9 +232,6 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
             await add_contact_tag(contact_id, "necesita-asesor")
             print(f"[Webhook] Transfer (in hours) for {contact_name} — HOT Lead: {moved}")
         else:
-            # Fuera de horario: el AI ya le pidió la hora preferida para mañana.
-            # No mandamos mensaje extra aquí — esperamos que el cliente responda con la hora.
-            # Solo marcamos como HOT Lead para que el asesor lo vea.
             moved = await move_to_hot_lead(contact_id)
             await add_contact_tag(contact_id, "llamar-manana")
             print(f"[Webhook] Transfer (out of hours) for {contact_name} — waiting for preferred time")

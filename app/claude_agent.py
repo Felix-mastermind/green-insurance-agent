@@ -125,22 +125,13 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     # Add current message
     messages.append({"role": "user", "content": user_message})
 
-    # Transfer when client is ready to book or has provided their data
+    # Transfer only when client explicitly wants to speak with someone
     transfer_keywords = [
-        "asesor", "agente", "hablar con", "llamar", "cotizar", "quiero comprar",
-        "quiero una cita", "agendar", "appointment", "schedule", "want to talk",
-        "speak with", "call me", "precio exacto", "exact price",
-        # Scheduling signals
-        "lunes", "martes", "miercoles", "jueves", "viernes",
-        "monday", "tuesday", "wednesday", "thursday", "friday",
-        "manana", "hoy", "tomorrow", "today",
-        "am", "pm", "mañana"
+        "asesor", "agente", "hablar con", "cotizar", "quiero comprar",
+        "quiero una cita", "want to talk", "speak with", "call me",
+        "precio exacto", "exact price", "quiero hablar", "conectame",
     ]
     should_transfer = any(kw in user_message.lower() for kw in transfer_keywords)
-
-    # Transfer after 4+ exchanges — client is qualified enough
-    if len(history) >= 4:
-        should_transfer = True
 
     # Detect wrong_number and not_interested before calling AI
     msg_lower = user_message.lower()
@@ -229,9 +220,16 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         wants_appt_kw = [
             "cita", "appointment", "agendar", "schedule", "programar"
         ]
+        # Also detect appointment confirmation from AI response
+        appt_confirmed_kw = [
+            "quedo agendada", "quedó agendada", "cita agendada", "appointment booked",
+            "listo", "agendado", "te va a llamar", "te llamara", "will call you",
+        ]
+        ai_lower = ai_text.lower()
+
         if any(w in msg_lower for w in wants_call_kw):
             intent = "wants_call"
-        elif any(w in msg_lower for w in wants_appt_kw):
+        elif any(w in msg_lower for w in wants_appt_kw) or any(w in ai_lower for w in appt_confirmed_kw):
             intent = "wants_appointment"
             preferred_time = user_message
         elif any(w in msg_lower for w in ["precio", "costo", "price", "cost", "cuanto"]):
