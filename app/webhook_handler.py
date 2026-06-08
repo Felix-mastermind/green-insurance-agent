@@ -119,9 +119,12 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
     if msg_stripped in ("1", "2", "3", "4", "5") and await check_survey_pending(contact_id):
         await handle_survey_response(contact_id, contact_name, int(msg_stripped), channel)
         return
+    # Pre-fetch pipeline so AI can give product-specific responses (e.g. already_insured)
+    _, product = await get_contact_pipeline(contact_id)
+
     # Get AI response — pasar si es horario hábil para ajustar el mensaje de cierre
     in_hours = is_business_hours()
-    ai_result = await get_ai_response(contact_id, message, contact_name, business_hours=in_hours)
+    ai_result = await get_ai_response(contact_id, message, contact_name, business_hours=in_hours, product=product)
     response_text = ai_result["response"]
     should_transfer = ai_result["should_transfer"]
 
@@ -141,7 +144,6 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
     # Client wants immediate call
     if intent == "wants_call":
         assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
-        _, product = await get_contact_pipeline(contact_id)
         await notify_advisor_call_requested(contact_id, contact_name, assigned_uid, product)
         await move_to_hot_lead(contact_id)
         print(f"[Webhook] {contact_name} wants call — HOT Lead + advisor notified")
@@ -153,7 +155,6 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         appt = await create_appointment(contact_id, contact_name, assigned_uid, preferred_time)
         if appt.get("id") or appt.get("appointmentId"):
             await move_to_appointment_booked(contact_id)
-            _, product = await get_contact_pipeline(contact_id)
             contact_info = await get_contact(contact_id)
             phone = (contact_info or {}).get("phone", "") or ""
             phone_str = " | Tel: " + phone if phone else ""

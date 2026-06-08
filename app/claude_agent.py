@@ -94,7 +94,7 @@ REGLAS:
 
 Green Insurance - Marietta, GA 30060 | L-V 11am-7pm ET"""
 
-async def get_ai_response(contact_id: str, user_message: str, contact_name: str = "", business_hours: bool = True) -> dict:
+async def get_ai_response(contact_id: str, user_message: str, contact_name: str = "", business_hours: bool = True, product: str = "") -> dict:
     """
     Get AI response for a lead message
     Returns: {"response": str, "should_transfer": bool, "intent": str}
@@ -151,7 +151,25 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         await save_conversation_message(contact_id, "assistant", reply)
         return {"response": reply, "should_transfer": False, "intent": "wrong_number", "preferred_time": ""}
     if any(kw in msg_lower for kw in already_insured_keywords):
-        reply = "Entendido! Si en algun momento quieres comparar opciones o mejorar tu cobertura, aqui estamos. Que tengas un buen dia!"
+        product_lower = product.lower()
+        if "life" in product_lower or "vida" in product_lower:
+            reply = ("Entendido! Aunque ya tengas seguro de vida, podemos comparar tu cobertura "
+                     "actual con nuevas opciones que podrian darte mejores beneficios a menor costo. "
+                     "Te interesaria que un asesor te haga una comparacion sin compromiso?")
+        elif "auto" in product_lower:
+            reply = ("Entendido! Aunque ya tengas seguro de auto, podemos comparar tu cobertura "
+                     "actual y ver si podemos mejorarte los beneficios o ahorrarte dinero. "
+                     "Te gustaria que un asesor te contacte?")
+        elif "dental" in product_lower:
+            reply = ("Entendido! Ademas de dental, tambien ofrecemos seguros de salud, vida, auto "
+                     "y comercial. Hay algun otro tipo de seguro en el que te podamos ayudar?")
+        elif "health" in product_lower or "salud" in product_lower:
+            reply = ("Entendido! Aunque ya tengas seguro de salud, podemos revisar si hay mejores "
+                     "opciones o coberturas adicionales disponibles para ti. "
+                     "Te gustaria que un asesor te contacte?")
+        else:
+            reply = ("Entendido! Si en algun momento quieres comparar opciones o mejorar tu "
+                     "cobertura, aqui estamos. Que tengas un buen dia!")
         await save_conversation_message(contact_id, "user", user_message)
         await save_conversation_message(contact_id, "assistant", reply)
         return {"response": reply, "should_transfer": False, "intent": "already_insured", "preferred_time": ""}
