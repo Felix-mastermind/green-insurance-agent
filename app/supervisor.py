@@ -9,12 +9,15 @@ from typing import Any, Callable
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from pydantic import BaseModel
+
 from app.ghl_client import (
     GHLIntegrationError,
     get_conversations,
     get_opportunities,
     get_pipelines,
     get_users,
+    reassign_opportunity,
 )
 
 router = APIRouter(prefix="/supervisor", tags=["supervisor"])
@@ -52,7 +55,7 @@ async def load_supervisor_data() -> dict:
     users, opportunities, conversations, pipelines = await asyncio.gather(
         get_users(),
         get_opportunities(),
-        get_conversations(),
+        load_conversations_safe(),
         get_pipelines(),
     )
     return {
@@ -61,6 +64,72 @@ async def load_supervisor_data() -> dict:
         "conversations": conversations,
         "pipelines": pipelines,
     }
+
+
+async def load_conversations_safe() -> list:
+    try:
+        return await get_conversations()
+    except GHLIntegrationError as e:
+        logger.error(
+            "[Supervisor] Continuing without conversations | endpoint=%s | status_code=%s | response_body=%s",
+            e.endpoint,
+            e.ghl_status or e.status_code,
+            e.ghl_response,
+        )
+        return []
+
+
+async def supervisor_light_response(builder: Callable[[dict], Any]):
+    try:
+        opportunities, pipelines = await asyncio.gather(
+            get_opportunities(),
+            get_pipelines(),
+        )
+        return builder({"opportunities": opportunities, "pipelines": pipelines})
+    except GHLIntegrationError as e:
+        logger.error(
+            "[Supervisor Diagnostics] GHL error | endpoint=%s | status_code=%s | response_body=%s",
+            e.endpoint,
+            e.ghl_status or e.status_code,
+            e.ghl_response,
+        )
+        return JSONResponse(
+            status_code=e.status_code,
+            content={
+                "status": "error",
+                "ghl_status": e.ghl_status or e.status_code,
+                "ghl_response": e.ghl_response,
+                "endpoint": e.endpoint,
+            },
+        )
+    except Exception as e:
+        logger.exception("[Supervisor Diagnostics] Unexpected error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def supervisor_pipelines_response(builder: Callable[[list], Any]):
+    try:
+        pipelines = await get_pipelines()
+        return builder(pipelines)
+    except GHLIntegrationError as e:
+        logger.error(
+            "[Supervisor Pipeline Diagnostics] GHL error | endpoint=%s | status_code=%s | response_body=%s",
+            e.endpoint,
+            e.ghl_status or e.status_code,
+            e.ghl_response,
+        )
+        return JSONResponse(
+            status_code=e.status_code,
+            content={
+                "status": "error",
+                "ghl_status": e.ghl_status or e.status_code,
+                "ghl_response": e.ghl_response,
+                "endpoint": e.endpoint,
+            },
+        )
+    except Exception as e:
+        logger.exception("[Supervisor Pipeline Diagnostics] Unexpected error")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def field(record: dict, *names: str, default: Any = None) -> Any:
@@ -943,3 +1012,44 @@ async def supervisor_debug_mapping():
 @router.get("/pipeline-map")
 async def supervisor_pipeline_map():
     return await supervisor_response(pipeline_map)
+
+
+class ReassignRequest(BaseModel):
+    opportunity_id: str
+    user_id: str
+
+
+class BulkReassignRequest(BaseModel):
+    opportunity_ids: list[str]
+    user_id: str
+
+
+@router.post("/reassign")
+async def supervisor_reassign(body: ReassignRequest):
+    try:
+        result = await reassign_opportunity(body.opportunity_id, body.user_id)
+        return {"status": "ok", "opportunity_id": body.opportunity_id, "assigned_to": body.user_id, "result": result}
+    except GHLIntegrationError as e:
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"status": "error", "ghl_status": e.ghl_status or e.status_code, "ghl_response": e.ghl_response, "endpoint": e.endpoint},
+        )
+    except Exception as e:
+        logger.exception("[Supervisor] Reassign error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/reassign-bulk")
+async def supervisor_reassign_bulk(body: BulkReassignRequest):
+    results = await asyncio.gather(
+        *[reassign_opportunity(oid, body.user_id) for oid in body.opportunity_ids],
+        return_exceptions=True,
+    )
+    succeeded = []
+    failed = []
+    for oid, result in zip(body.opportunity_ids, results):
+        if isinstance(result, Exception):
+            failed.append({"opportunity_id": oid, "error": str(result)})
+        else:
+            succeeded.append({"opportunity_id": oid, "result": result})
+    return {"status": "ok", "assigned_to": body.user_id, "succeeded": succeeded, "failed": failed}

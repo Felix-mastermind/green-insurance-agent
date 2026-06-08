@@ -40,6 +40,11 @@ CUANDO TRANSFERIR A ASESOR:
 - Cliente pregunta precio especifico
 - Cliente quiere comprar ahora
 - Cliente tiene preguntas tecnicas de cobertura
+
+IMPORTANTE - EVITAR DUPLICADOS:
+- Cuando vayas a transferir al cliente, incluye el aviso en tu respuesta principal.
+- NO repitas el mismo mensaje dos veces en la misma respuesta.
+- Cada respuesta debe ser UN solo mensaje claro y conciso.
 """
 
 async def get_ai_response(contact_id: str, user_message: str, contact_name: str = "") -> dict:

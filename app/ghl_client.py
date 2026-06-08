@@ -280,6 +280,14 @@ async def update_contact_stage(opportunity_id: str, stage_id: str) -> dict:
         json={"stageId": stage_id}
     )
 
+async def reassign_opportunity(opportunity_id: str, user_id: str) -> dict:
+    """Reassign an opportunity to a different user"""
+    return await request_ghl(
+        "PUT",
+        f"/opportunities/{opportunity_id}",
+        json={"assignedTo": user_id}
+    )
+
 async def get_contact_custom_field(contact: dict, field_id: str) -> Optional[str]:
     """Extract a custom field value from a contact"""
     for cf in contact.get("customFields", []):
