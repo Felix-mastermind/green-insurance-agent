@@ -221,7 +221,19 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         print(f"[Webhook] Not interested: {contact_name} — moved to Not Interested stage")
 
     elif should_transfer:
-        if in_hours:
+        # Don't re-send transfer message if lead is already in a handled stage
+        from app.ghl_client import get_contact_opportunities as _get_opps
+        _opps = await _get_opps(contact_id)
+        _current_stage = ""
+        for _opp in _opps:
+            _ps = _opp.get("pipelineStage") or {}
+            _current_stage = (_ps.get("name", "").lower() if isinstance(_ps, dict) else "")
+            if _current_stage:
+                break
+        _skip = {"appointment booked", "hot lead", "hot leads", "cita agendada", "quoted"}
+        if any(s in _current_stage for s in _skip):
+            print(f"[Webhook] Transfer skipped — {contact_name} already in stage '{_current_stage}'")
+        elif in_hours:
             transfer_msg = ("Un asesor de Green Insurance se comunicara contigo en breve. "
                             "Gracias por tu paciencia!")
             if channel == "SMS":

@@ -128,9 +128,10 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     # Transfer only when client explicitly wants to speak with someone
     transfer_keywords = [
         "asesor", "agente", "hablar con", "cotizar", "quiero comprar",
-        "quiero una cita", "want to talk", "speak with", "call me",
+        "want to talk", "speak with", "call me",
         "precio exacto", "exact price", "quiero hablar", "conectame",
     ]
+    # "quiero una cita" removed — handled by wants_appt_kw / wants_appointment intent
     should_transfer = any(kw in user_message.lower() for kw in transfer_keywords)
 
     # Detect wrong_number and not_interested before calling AI
