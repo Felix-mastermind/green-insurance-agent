@@ -14,8 +14,8 @@ from contextlib import asynccontextmanager
 
 from app.webhook_handler import router as webhook_router
 from app.supervisor import router as supervisor_router
-from app.payment_reminders import run_payment_reminders
 from app.renewal_reminders import run_renewal_reminders
+from app.follow_ups import run_follow_ups
 from app.ghl_client import (
     GHLIntegrationError,
     get_conversations,
@@ -48,14 +48,6 @@ async def lifespan(app: FastAPI):
     for route in registered_routes():
         print(f"[Route] {','.join(route['methods'])} {route['path']} -> {route['name']}")
 
-    # Payment reminders - daily at 9:00am ET
-    scheduler.add_job(
-        run_payment_reminders,
-        CronTrigger(hour=9, minute=0, timezone=ET),
-        id="payment_reminders",
-        name="Payment Reminders",
-        replace_existing=True
-    )
 
     # Renewal reminders - daily at 10:00am ET
     scheduler.add_job(
@@ -66,8 +58,29 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
 
+    # Follow-ups - 2:00pm and 4:30pm ET
+    scheduler.add_job(
+        run_follow_ups,
+        CronTrigger(hour=14, minute=0, timezone=ET),
+        id="follow_ups_1400",
+        name="Follow Ups 14:00",
+        replace_existing=True
+    )
+    scheduler.add_job(
+        run_follow_ups,
+        CronTrigger(hour=16, minute=30, timezone=ET),
+        id="follow_ups_1630",
+        name="Follow Ups 16:30",
+        replace_existing=True
+    )
+
     scheduler.start()
-    print("[Agent] Scheduler started. Jobs: payment reminders (9am ET), renewals (10am ET)")
+
+    # Run follow-ups immediately on startup to catch all existing leads
+    import asyncio
+    asyncio.get_event_loop().create_task(run_follow_ups(force=True))
+    print("[Agent] Startup follow-up triggered — reviewing all leads")
+    print("[Agent] Scheduler started. Jobs: renewals (10am), follow-ups (2pm/4:30pm ET)")
     print("[Agent] Ready to receive webhooks from GHL")
 
     yield
@@ -93,17 +106,16 @@ async def root():
         "version": "1.0.0",
         "status": "running",
         "modules": [
-            "payment_reminders",
             "renewal_reminders",
             "webhook_handler",
             "claude_agent"
         ]
     }
 
-@app.post("/run/payment-reminders")
-async def trigger_payment_reminders():
-    """Manually trigger payment reminders (for testing)"""
-    result = await run_payment_reminders()
+@app.post("/run/follow-ups")
+async def trigger_follow_ups():
+    """Manually trigger follow-ups"""
+    result = await run_follow_ups()
     return result
 
 @app.post("/run/renewal-reminders")

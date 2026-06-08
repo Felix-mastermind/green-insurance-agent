@@ -1,80 +1,153 @@
+"""
+Supabase client using direct REST API calls via httpx
+Avoids supabase-py proxy/httpx version incompatibilities
+"""
 import os
-from supabase import create_client, Client
+import httpx
 from datetime import datetime
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
-def get_supabase() -> Client:
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+def get_headers() -> dict:
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+def rest_url(table: str) -> str:
+    return f"{SUPABASE_URL}/rest/v1/{table}"
+
+
+async def _insert(table: str, data: dict) -> bool:
+    """Insert a row into a Supabase table"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(rest_url(table), headers=get_headers(), json=data)
+            return r.status_code in (200, 201)
+    except Exception as e:
+        print(f"[Supabase] Insert error ({table}): {e}")
+        return False
+
+
+async def _select(table: str, filters: dict, columns: str = "*", limit: int = 100, order: str = None) -> list:
+    """Select rows from a Supabase table"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+    try:
+        headers = {**get_headers(), "Prefer": ""}
+        params = {**filters, "select": columns, "limit": limit}
+        if order:
+            params["order"] = order
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(rest_url(table), headers=headers, params=params)
+            if r.status_code == 200:
+                return r.json()
+            return []
+    except Exception as e:
+        print(f"[Supabase] Select error ({table}): {e}")
+        return []
+
 
 async def log_message(contact_id: str, contact_name: str, contact_phone: str,
-                       channel: str, message_type: str, message_body: str,
-                       status: str = "sent", metadata: dict = None):
+                      channel: str, message_type: str, message_body: str,
+                      status: str = "sent", metadata: dict = None):
     """Log a sent message to Supabase"""
-    try:
-        sb = get_supabase()
-        sb.table("messages_log").insert({
-            "contact_id": contact_id,
-            "contact_name": contact_name,
-            "contact_phone": contact_phone,
-            "channel": channel,
-            "message_type": message_type,
-            "message_body": message_body,
-            "status": status,
-            "metadata": metadata or {}
-        }).execute()
-    except Exception as e:
-        print(f"[Supabase] Error logging message: {e}")
+    await _insert("messages_log", {
+        "contact_id": contact_id,
+        "contact_name": contact_name,
+        "contact_phone": contact_phone,
+        "channel": channel,
+        "message_type": message_type,
+        "message_body": message_body,
+        "status": status,
+        "metadata": metadata or {}
+    })
+
 
 async def check_reminder_sent(contact_id: str, reminder_type: str, month_year: str) -> bool:
     """Check if a payment reminder was already sent this month"""
-    try:
-        sb = get_supabase()
-        result = sb.table("payment_reminders_log").select("id").eq(
-            "contact_id", contact_id
-        ).eq("reminder_type", reminder_type).eq("month_year", month_year).execute()
-        return len(result.data) > 0
-    except Exception as e:
-        print(f"[Supabase] Error checking reminder: {e}")
-        return False
+    rows = await _select(
+        "payment_reminders_log",
+        {"contact_id": f"eq.{contact_id}", "reminder_type": f"eq.{reminder_type}", "month_year": f"eq.{month_year}"},
+        columns="id",
+        limit=1
+    )
+    return len(rows) > 0
+
 
 async def log_reminder_sent(contact_id: str, contact_name: str,
                              payment_day: int, reminder_type: str, month_year: str):
     """Log that a payment reminder was sent"""
-    try:
-        sb = get_supabase()
-        sb.table("payment_reminders_log").insert({
-            "contact_id": contact_id,
-            "contact_name": contact_name,
-            "payment_day": payment_day,
-            "reminder_type": reminder_type,
-            "month_year": month_year
-        }).execute()
-    except Exception as e:
-        print(f"[Supabase] Error logging reminder: {e}")
+    await _insert("payment_reminders_log", {
+        "contact_id": contact_id,
+        "contact_name": contact_name,
+        "payment_day": payment_day,
+        "reminder_type": reminder_type,
+        "month_year": month_year
+    })
 
-async def save_conversation_message(contact_id: str, role: str, content: str, channel: str = "sms"):
+
+async def save_conversation_message(contact_id: str, role: str, content: str, channel: str = "whatsapp"):
     """Save a conversation message"""
-    try:
-        sb = get_supabase()
-        sb.table("conversation_messages").insert({
-            "contact_id": contact_id,
-            "role": role,
-            "content": content,
-            "channel": channel
-        }).execute()
-    except Exception as e:
-        print(f"[Supabase] Error saving message: {e}")
+    await _insert("conversation_messages", {
+        "contact_id": contact_id,
+        "role": role,
+        "content": content,
+        "channel": channel
+    })
+
 
 async def get_conversation_history(contact_id: str, limit: int = 10) -> list:
     """Get recent conversation messages for a contact"""
+    rows = await _select(
+        "conversation_messages",
+        {"contact_id": f"eq.{contact_id}"},
+        columns="role,content,created_at",
+        limit=limit,
+        order="created_at.desc"
+    )
+    return list(reversed(rows))
+
+
+async def log_survey_sent(contact_id: str, contact_name: str) -> bool:
+    """Record that a review survey was sent to this contact"""
+    return await _insert("review_surveys", {
+        "contact_id": contact_id,
+        "contact_name": contact_name,
+        "status": "pending"
+    })
+
+
+async def check_survey_pending(contact_id: str) -> bool:
+    """Check if this contact has an unanswered review survey"""
+    rows = await _select(
+        "review_surveys",
+        {"contact_id": f"eq.{contact_id}", "status": f"eq.pending"},
+        columns="id",
+        limit=1
+    )
+    return len(rows) > 0
+
+
+async def mark_survey_answered(contact_id: str) -> bool:
+    """Mark the survey as answered so it doesn't trigger again"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return False
     try:
-        sb = get_supabase()
-        result = sb.table("conversation_messages").select("*").eq(
-            "contact_id", contact_id
-        ).order("created_at", desc=True).limit(limit).execute()
-        return list(reversed(result.data))
+        headers = {**get_headers(), "Prefer": ""}
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.patch(
+                rest_url("review_surveys"),
+                headers=headers,
+                params={"contact_id": f"eq.{contact_id}", "status": f"eq.pending"},
+                json={"status": "answered"}
+            )
+            return r.status_code in (200, 204)
     except Exception as e:
-        print(f"[Supabase] Error getting history: {e}")
-        return []
+        print(f"[Supabase] mark_survey_answered error: {e}")
+        return False

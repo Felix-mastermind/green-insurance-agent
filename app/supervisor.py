@@ -195,32 +195,36 @@ def record_id(record: dict) -> str:
 
 
 def opportunity_stage_id(opportunity: dict) -> str:
-    stage = field(opportunity, "stage", "pipelineStage", "pipeline_stage", default={})
-    if isinstance(stage, dict):
-        return clean_id(field(stage, "id", "_id", "uid", "stageId", "pipelineStageId", "pipelineStageUid", default=""))
-    if isinstance(stage, str):
-        return clean_id(stage)
-    return clean_id(field(
+    # First try top-level stage ID fields (GHL API returns pipelineStageUId with capital I)
+    top_level = clean_id(field(
         opportunity,
         "pipelineStageId",
-        "pipelineStageUid",
+        "pipelineStageUId",   # GHL uses capital I
+        "pipelineStageUid",   # fallback lowercase
+        "pipelineStageUID",
         "pipeline_stage_id",
         "pipeline_stage_uid",
         "stageId",
         "stageUid",
+        "stageUID",
         "stage_id",
         "stage_uid",
         default="",
     ))
+    if top_level:
+        return top_level
+    # Fallback: check nested stage object
+    stage = field(opportunity, "stage", "pipelineStage", "pipeline_stage", default={})
+    if isinstance(stage, dict) and stage:
+        return clean_id(field(stage, "id", "_id", "uid", "stageId", "pipelineStageId", "pipelineStageUId", "pipelineStageUid", default=""))
+    if isinstance(stage, str):
+        return clean_id(stage)
+    return ""
 
 
 def opportunity_pipeline_id(opportunity: dict) -> str:
-    pipeline = field(opportunity, "pipeline", "pipelineData", "pipeline_data", default={})
-    if isinstance(pipeline, dict):
-        return clean_id(field(pipeline, "id", "_id", "uid", "pipelineId", "pipelineUid", default=""))
-    if isinstance(pipeline, str):
-        return clean_id(pipeline)
-    return clean_id(field(
+    # First try top-level pipelineId fields (most reliable from GHL API)
+    top_level = clean_id(field(
         opportunity,
         "pipelineId",
         "pipelineUid",
@@ -229,6 +233,19 @@ def opportunity_pipeline_id(opportunity: dict) -> str:
         "pipelineID",
         default="",
     ))
+    if top_level:
+        return top_level
+
+    # Fallback: check nested pipeline object
+    pipeline = field(opportunity, "pipeline", "pipelineData", "pipeline_data", default={})
+    if isinstance(pipeline, dict) and pipeline:
+        nested = clean_id(field(pipeline, "id", "_id", "uid", "pipelineId", "pipelineUid", default=""))
+        if nested:
+            return nested
+    if isinstance(pipeline, str):
+        return clean_id(pipeline)
+
+    return ""
 
 
 def stage_items(pipeline: dict) -> list:
