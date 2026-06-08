@@ -138,13 +138,23 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     ]
     not_interested_keywords = [
         "no me interesa", "no estoy interesado", "not interested", "no gracias",
-        "no thank you", "no necesito", "don't need", "dont need", "ya tengo", "already have"
+        "no thank you", "no necesito", "don't need", "dont need",
+    ]
+    already_insured_keywords = [
+        "ya tengo seguro", "tengo seguro", "ya tengo uno", "ya tengo un seguro",
+        "already have insurance", "already insured", "i have insurance",
+        "i have coverage", "i'm already covered", "already covered",
     ]
     if any(kw in msg_lower for kw in wrong_number_keywords):
         reply = "Entiendo, disculpa la molestia."
         await save_conversation_message(contact_id, "user", user_message)
         await save_conversation_message(contact_id, "assistant", reply)
         return {"response": reply, "should_transfer": False, "intent": "wrong_number", "preferred_time": ""}
+    if any(kw in msg_lower for kw in already_insured_keywords):
+        reply = "Entendido! Si en algun momento quieres comparar opciones o mejorar tu cobertura, aqui estamos. Que tengas un buen dia!"
+        await save_conversation_message(contact_id, "user", user_message)
+        await save_conversation_message(contact_id, "assistant", reply)
+        return {"response": reply, "should_transfer": False, "intent": "already_insured", "preferred_time": ""}
     if any(kw in msg_lower for kw in not_interested_keywords):
         reply = "Entendido, gracias por tu tiempo. Si en el futuro necesitas un seguro, aqui estaremos."
         await save_conversation_message(contact_id, "user", user_message)

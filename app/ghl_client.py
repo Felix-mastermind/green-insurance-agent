@@ -586,17 +586,29 @@ async def get_latest_inbound_message(contact_id: str) -> dict | None:
         logger.error("[GHL] Error fetching latest message for %s: %s", contact_id, e)
         return None
 
-# Stage IDs por pipeline para Wrong Number y Not Interested
+# Stage IDs por pipeline para Wrong Number, Not Interested y Already Insured
 WRONG_NUMBER_STAGES = {
-    "BdzkOH5twVi9sCK2ag96": "ccd6cd2c-f582-42b5-bd10-86e8131300c8",  # Auto
-    "HzCwe9SCtirKXGFdFLVT": "e1a24e5d-1781-4d15-b03c-6e17b4535fdd",  # Dental (verificar)
+    "BdzkOH5twVi9sCK2ag96": "e1a24e5d-1781-4d15-b03c-6e17b4535fdd",  # Auto Mastermind
+    "ZJtWRO02c1YLYRE4w8Vz": "ccd6cd2c-f582-42b5-bd10-86e8131300c8",  # Auto
+    "HzCwe9SCtirKXGFdFLVT": "dcc131c8-62c9-4f7f-9eda-b575c536c299",  # Dental
     "XrTzKSNz9VpYuSvVZzyH": "a0dd748d-6935-4a78-9972-0bc9fb0a3874",  # Life
+    "jIL4s1pxTh7a4XIyrdVy": "313124c2-f770-4fdc-99d7-dc80f227b750",  # Commercial Workers Comp
 }
 
 NOT_INTERESTED_STAGES = {
-    "BdzkOH5twVi9sCK2ag96": "9f28ff58-da56-4938-9843-21bc60281b28",  # Auto
-    "HzCwe9SCtirKXGFdFLVT": "ae120912-5fba-4fb0-af67-8c8aa12da6f4",  # Dental
-    "XrTzKSNz9VpYuSvVZzyH": "bbda9122-3539-4f8b-843a-b002d8213a78",  # Life
+    "BdzkOH5twVi9sCK2ag96": "ae120912-5fba-4fb0-af67-8c8aa12da6f4",  # Auto Mastermind
+    "ZJtWRO02c1YLYRE4w8Vz": "9f28ff58-da56-4938-9843-21bc60281b28",  # Auto
+    "HzCwe9SCtirKXGFdFLVT": "66a31fce-a500-4e3c-9367-e31a72f074d7",  # Dental
+    "XrTzKSNz9VpYuSvVZzyH": "634f6a6c-3176-4859-9202-220ea86717c1",  # Life
+    "tq3UJ2n4L2WzITHXcGA2": "961fa6d1-a387-4404-9637-e8e01b3d2b5e",  # Health
+    "jIL4s1pxTh7a4XIyrdVy": "24a37287-9ed4-4372-b164-a3078e17b240",  # Commercial Workers Comp
+    "daAutexAB2Tj02taaSSf": "bbda9122-3539-4f8b-843a-b002d8213a78",  # Commercial Auto
+}
+
+ALREADY_INSURED_STAGES = {
+    "BdzkOH5twVi9sCK2ag96": "834a442d-ce94-4a06-81c3-f5a49c2dc53c",  # Auto Mastermind
+    "ZJtWRO02c1YLYRE4w8Vz": "808b8b5a-d88f-4184-b231-8a3dd0b7ccf4",  # Auto
+    "daAutexAB2Tj02taaSSf": "e001962d-1d28-4f07-ae65-94e73c750974",  # Commercial Auto
 }
 
 async def send_email(contact_id: str, subject: str, body: str) -> dict:
@@ -653,6 +665,20 @@ async def move_to_not_interested(contact_id: str) -> bool:
             moved = True
     return moved
 
+async def move_to_already_insured(contact_id: str) -> bool:
+    """Move contact's opportunity to Already Insured stage"""
+    opportunities = await get_contact_opportunities(contact_id)
+    if not opportunities:
+        return False
+    moved = False
+    for opp in opportunities:
+        pipeline_id = opp.get("pipelineId", "")
+        stage_id = ALREADY_INSURED_STAGES.get(pipeline_id)
+        if stage_id:
+            await update_contact_stage(opp.get("id", ""), stage_id)
+            moved = True
+    return moved
+
 async def get_contact_pipeline(contact_id: str) -> tuple[str, str]:
     """Returns (pipeline_id, pipeline_name) for the contact's first active opportunity"""
     opportunities = await get_contact_opportunities(contact_id)
@@ -682,8 +708,13 @@ AGENTS_CALENDARS = {
 DEFAULT_CALENDAR_ID = "PydmDhNqVvTlKlaDTNtv"
 
 APPOINTMENT_BOOKED_STAGES = {
-    "BdzkOH5twVi9sCK2ag96": "8d04fdf3-04ae-4e77-a6b7-f0e6a0e220f8",  # Auto
-    # Dental y Life se agregan cuando se consigan los IDs
+    "BdzkOH5twVi9sCK2ag96": "8d04fdf3-04ae-4e77-a6b7-f0e6a0e220f8",  # Auto Mastermind
+    "ZJtWRO02c1YLYRE4w8Vz": "b4c8b567-5e21-4ea8-bd9a-b290315f357e",  # Auto
+    "HzCwe9SCtirKXGFdFLVT": "2d5ce6ff-096b-44f9-ad50-e45491b66269",  # Dental
+    "XrTzKSNz9VpYuSvVZzyH": "443db9b7-2d78-4932-b7d0-870361d49b39",  # Life
+    "tq3UJ2n4L2WzITHXcGA2": "7d1ef084-3ae1-49ae-93cb-a2d375bfc59c",  # Health
+    "jIL4s1pxTh7a4XIyrdVy": "1f073556-02d2-4c8b-a915-41ae5cf3aaab",  # Commercial Workers Comp
+    "daAutexAB2Tj02taaSSf": "278db8b6-c3c7-47af-a21a-c2d32a7d3e4e",  # Commercial Auto
 }
 
 async def get_opportunity_assigned_user(contact_id: str) -> str:

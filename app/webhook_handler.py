@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
 from app.scheduler import scheduler, ET
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities
 from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
 
 router = APIRouter()
@@ -194,6 +194,11 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
             print(f"[Webhook] Wrong number for {contact_name} — moved to stage, email sent to {email}")
         else:
             print(f"[Webhook] Wrong number for {contact_name} — moved to stage, no valid email")
+
+    # Handle already insured
+    elif ai_result.get("intent") == "already_insured":
+        await move_to_already_insured(contact_id)
+        print(f"[Webhook] Already insured: {contact_name} — moved to Already Insured stage")
 
     # Handle not interested
     elif ai_result.get("intent") == "not_interested":
