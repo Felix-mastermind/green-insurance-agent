@@ -349,30 +349,34 @@ async def add_contact_tag(contact_id: str, tag: str) -> dict:
 BOT_USER_ID = "rM9FFKJ79TshgMmOZ7Nn"
 
 async def send_sms(contact_id: str, message: str) -> dict:
-    """Send SMS to a contact as Asistente Green"""
-    return await request_ghl(
-        "POST",
-        "/conversations/messages",
-        json={
-            "type": "SMS",
-            "contactId": contact_id,
-            "message": message,
-            "userId": BOT_USER_ID,
-        }
-    )
+    """Send SMS to a contact as Asistente Green.
+    Uses conversationId so GHL respects the userId and shows Asistente Green as sender."""
+    conv_id = await get_contact_conversation_id(contact_id)
+    payload = {
+        "type": "SMS",
+        "message": message,
+        "userId": BOT_USER_ID,
+    }
+    if conv_id:
+        payload["conversationId"] = conv_id
+    else:
+        payload["contactId"] = contact_id
+    return await request_ghl("POST", "/conversations/messages", json=payload)
 
 async def send_whatsapp(contact_id: str, message: str) -> dict:
-    """Send WhatsApp message to a contact as Asistente Green"""
-    return await request_ghl(
-        "POST",
-        "/conversations/messages",
-        json={
-            "type": "WhatsApp",
-            "contactId": contact_id,
-            "message": message,
-            "userId": BOT_USER_ID,
-        }
-    )
+    """Send WhatsApp message to a contact as Asistente Green.
+    Uses conversationId so GHL respects the userId and shows Asistente Green as sender."""
+    conv_id = await get_contact_conversation_id(contact_id)
+    payload = {
+        "type": "WhatsApp",
+        "message": message,
+        "userId": BOT_USER_ID,
+    }
+    if conv_id:
+        payload["conversationId"] = conv_id
+    else:
+        payload["contactId"] = contact_id
+    return await request_ghl("POST", "/conversations/messages", json=payload)
 
 # HOT Leads stage IDs per pipeline
 HOT_LEADS_STAGES = {
