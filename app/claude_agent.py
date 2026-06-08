@@ -2,8 +2,20 @@
 Claude AI Agent - Handles lead conversations intelligently
 """
 import os
+import re
 import anthropic
 from app.supabase_client import get_conversation_history, save_conversation_message
+
+
+def clean_ai_response(text: str) -> str:
+    """Strip any JSON blocks, code fences or structured data the AI accidentally includes."""
+    # Remove ```...``` code blocks (including ```json)
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    # Remove standalone { ... } JSON objects
+    text = re.sub(r'\{[^{}]*\}', '', text)
+    # Collapse extra blank lines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 _client = None
 
@@ -22,7 +34,7 @@ FORMATO OBLIGATORIO:
 - Solo texto plano. Sin asteriscos, guiones, listas ni negritas.
 - Maximo 2 oraciones por mensaje.
 - Una sola pregunta a la vez.
-- Nunca incluyas JSON ni codigos.
+- PROHIBIDO incluir JSON, codigo, llaves {}, corchetes [] o bloques de texto tecnico. El cliente ve directamente tu respuesta.
 
 IDIOMA: Responde siempre en el mismo idioma del cliente (español o ingles).
 
@@ -200,7 +212,7 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
             system=system_prompt,
             messages=messages
         )
-        ai_text = response.content[0].text
+        ai_text = clean_ai_response(response.content[0].text)
 
         # Save to conversation history
         await save_conversation_message(contact_id, "user", user_message)
