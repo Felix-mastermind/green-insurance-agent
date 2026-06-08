@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
 from app.scheduler import scheduler, ET
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, create_opportunity, CROSS_SELL_PIPELINES, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, create_opportunity, CROSS_SELL_PIPELINES, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities, is_bot_paused
 from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
 
 router = APIRouter()
@@ -349,6 +349,11 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
 
         if is_inbound and contact_id:
             contact_name = extract_contact_name(payload)
+
+            # STOP bot if contact has 'bot-pausado' tag (manual pause by advisor)
+            if await is_bot_paused(contact_id):
+                print(f"[Webhook] SKIPPED — bot pausado para {contact_name} ({contact_id})")
+                return {"status": "ok", "event": "skipped_bot_pausado"}
 
             # STOP bot if a human agent has already responded in this conversation
             if await human_agent_active(contact_id):

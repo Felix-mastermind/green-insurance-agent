@@ -345,6 +345,32 @@ async def add_contact_tag(contact_id: str, tag: str) -> dict:
         logger.error("[GHL] Error adding tag %s to %s: %s", tag, contact_id, e)
         return {}
 
+
+async def remove_contact_tag(contact_id: str, tag: str) -> dict:
+    """Remove a tag from a contact in GHL"""
+    try:
+        return await request_ghl(
+            "DELETE",
+            f"/contacts/{contact_id}/tags",
+            json={"tags": [tag]}
+        )
+    except Exception as e:
+        logger.error("[GHL] Error removing tag %s from %s: %s", tag, contact_id, e)
+        return {}
+
+
+async def is_bot_paused(contact_id: str) -> bool:
+    """Returns True if contact has 'bot-pausado' tag — bot should not respond."""
+    try:
+        contact = await get_contact(contact_id)
+        if not contact:
+            return False
+        tags = contact.get("tags", []) or []
+        return "bot-pausado" in [t.lower() for t in tags]
+    except Exception as e:
+        logger.error("[GHL] Error checking bot-pausado tag for %s: %s", contact_id, e)
+        return False
+
 # Bot user ID — messages appear as "Asistente Green" in GHL
 BOT_USER_ID = "rM9FFKJ79TshgMmOZ7Nn"
 
