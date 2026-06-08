@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
 from app.scheduler import scheduler, ET
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, create_opportunity, CROSS_SELL_PIPELINES, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities
 from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
 
 router = APIRouter()
@@ -200,6 +200,28 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
     elif ai_result.get("intent") == "already_insured":
         await move_to_already_insured(contact_id)
         print(f"[Webhook] Already insured: {contact_name} — moved to Already Insured stage")
+
+    # Handle cross-sell: client in one pipeline asks about a different product
+    elif ai_result.get("intent") == "cross_sell":
+        target_product = ai_result.get("preferred_time", "")  # product type detected
+        pipeline_info = CROSS_SELL_PIPELINES.get(target_product)
+        if pipeline_info:
+            new_pipeline_id, new_stage_id = pipeline_info
+            contact_info = await get_contact(contact_id)
+            phone = (contact_info or {}).get("phone", "") or ""
+            phone_str = " | Tel: " + phone if phone else ""
+            opp_title = f"{contact_name} - {target_product.title()}"
+            new_opp = await create_opportunity(contact_id, new_pipeline_id, new_stage_id, opp_title)
+            opp_id = (new_opp.get("opportunity") or new_opp).get("id", "")
+            notify_msg = (
+                f"🔄 Cross-sell: {contact_name}{phone_str} estaba en pipeline '{product}' "
+                f"y ahora quiere cotizar '{target_product}'. "
+                f"Nueva oportunidad creada{' (ID: ' + opp_id + ')' if opp_id else ''}."
+            )
+            await send_sms(BARBARA_CONTACT_ID, notify_msg)
+            print(f"[Webhook] Cross-sell {contact_name}: {product} → {target_product} | opp={opp_id}")
+        else:
+            print(f"[Webhook] Cross-sell detected but no pipeline found for '{target_product}'")
 
     # Handle not interested
     elif ai_result.get("intent") == "not_interested":

@@ -679,6 +679,34 @@ async def move_to_already_insured(contact_id: str) -> bool:
             moved = True
     return moved
 
+# Pipeline IDs + New Lead stage IDs for cross-sell opportunity creation
+CROSS_SELL_PIPELINES = {
+    "life":       ("XrTzKSNz9VpYuSvVZzyH", "fc03f7b2-9216-403a-b4ec-cbe4947d9d66"),  # Life
+    "vida":       ("XrTzKSNz9VpYuSvVZzyH", "fc03f7b2-9216-403a-b4ec-cbe4947d9d66"),
+    "health":     ("tq3UJ2n4L2WzITHXcGA2", "53786523-a6c8-45d8-bf58-a1cc6779db52"),  # Health
+    "salud":      ("tq3UJ2n4L2WzITHXcGA2", "53786523-a6c8-45d8-bf58-a1cc6779db52"),
+    "auto":       ("BdzkOH5twVi9sCK2ag96", "53879a8a-6df4-479c-956d-2ef52e2d3a3f"),  # Auto Mastermind
+    "dental":     ("HzCwe9SCtirKXGFdFLVT", "a58c4225-2642-4752-a56b-7d7e81c27559"),  # Dental
+    "comercial":  ("jIL4s1pxTh7a4XIyrdVy", "4cb2e3ae-0b72-4a81-bdcb-a61eb44cc064"),  # Commercial
+    "commercial": ("jIL4s1pxTh7a4XIyrdVy", "4cb2e3ae-0b72-4a81-bdcb-a61eb44cc064"),
+}
+
+async def create_opportunity(contact_id: str, pipeline_id: str, stage_id: str, title: str = "New Lead") -> dict:
+    """Create a new opportunity for a contact in a specific pipeline"""
+    _, location_id = get_ghl_config()
+    return await request_ghl(
+        "POST",
+        "/opportunities/",
+        json={
+            "pipelineId": pipeline_id,
+            "pipelineStageId": stage_id,
+            "contactId": contact_id,
+            "locationId": location_id,
+            "name": title,
+            "status": "open",
+        }
+    )
+
 async def get_contact_pipeline(contact_id: str) -> tuple[str, str]:
     """Returns (pipeline_id, pipeline_name) for the contact's first active opportunity"""
     opportunities = await get_contact_opportunities(contact_id)

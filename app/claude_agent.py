@@ -153,20 +153,19 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     if any(kw in msg_lower for kw in already_insured_keywords):
         product_lower = product.lower()
         if "life" in product_lower or "vida" in product_lower:
-            reply = ("Entendido! Aunque ya tengas seguro de vida, podemos comparar tu cobertura "
-                     "actual con nuevas opciones que podrian darte mejores beneficios a menor costo. "
-                     "Te interesaria que un asesor te haga una comparacion sin compromiso?")
+            reply = ("Entendido! Muchas veces podemos encontrar mejores precios o mayores beneficios "
+                     "que tu poliza actual de vida. Te interesaria que un asesor compare tu cobertura "
+                     "actual con nuestras opciones sin ningun compromiso?")
         elif "auto" in product_lower:
-            reply = ("Entendido! Aunque ya tengas seguro de auto, podemos comparar tu cobertura "
-                     "actual y ver si podemos mejorarte los beneficios o ahorrarte dinero. "
-                     "Te gustaria que un asesor te contacte?")
+            reply = ("Entendido! Con frecuencia logramos conseguir mejores precios o mayores "
+                     "beneficios que tu seguro actual de auto. Te gustaria que un asesor compare "
+                     "tu cobertura y te diga si podemos mejorarla?")
         elif "dental" in product_lower:
             reply = ("Entendido! Ademas de dental, tambien ofrecemos seguros de salud, vida, auto "
                      "y comercial. Hay algun otro tipo de seguro en el que te podamos ayudar?")
         elif "health" in product_lower or "salud" in product_lower:
-            reply = ("Entendido! Aunque ya tengas seguro de salud, podemos revisar si hay mejores "
-                     "opciones o coberturas adicionales disponibles para ti. "
-                     "Te gustaria que un asesor te contacte?")
+            reply = ("Entendido! Podemos revisar si hay opciones con mejores precios o coberturas "
+                     "adicionales disponibles para ti. Te gustaria que un asesor te contacte?")
         else:
             reply = ("Entendido! Si en algun momento quieres comparar opciones o mejorar tu "
                      "cobertura, aqui estamos. Que tengas un buen dia!")
@@ -212,7 +211,8 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         preferred_time = ""
         wants_call_kw = [
             "llamar", "llamen", "call me", "call now", "ahora", "now",
-            "inmediato", "quiero que me llamen",
+            "inmediato", "quiero que me llamen", "me interesa", "si me interesa",
+            "quiero cotizar", "quiero comparar", "si quiero", "claro que si",
         ]
         wants_appt_kw = [
             "cita", "appointment", "agendar", "schedule", "programar"
@@ -224,8 +224,29 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
             preferred_time = user_message
         elif any(w in msg_lower for w in ["precio", "costo", "price", "cost", "cuanto"]):
             intent = "pricing"
-        elif any(w in msg_lower for w in ["dental", "salud", "health", "auto", "vida", "life"]):
-            intent = "product_interest"
+        else:
+            # Cross-sell detection: client mentions a DIFFERENT insurance type than current pipeline
+            _product_type_kw = {
+                "dental":     ["dental", "dientes", "teeth", "dentista"],
+                "life":       ["vida", "life insurance", "seguro de vida"],
+                "health":     ["salud", "health insurance", "seguro de salud", "medico"],
+                "auto":       ["auto", "carro", "coche", "car ", "vehiculo", "truck"],
+                "commercial": ["comercial", "commercial", "negocio", "business", "empresa"],
+            }
+            def _detect_type(text: str) -> str:
+                tl = text.lower()
+                for prod, kws in _product_type_kw.items():
+                    if any(kw in tl for kw in kws):
+                        return prod
+                return ""
+
+            current_type = _detect_type(product)
+            mentioned_type = _detect_type(user_message)
+            if mentioned_type and current_type and mentioned_type != current_type:
+                intent = "cross_sell"
+                preferred_time = mentioned_type  # reuse field to carry target product
+            elif any(w in msg_lower for w in ["dental", "salud", "health", "auto", "vida", "life"]):
+                intent = "product_interest"
 
         return {
             "response": ai_text,
