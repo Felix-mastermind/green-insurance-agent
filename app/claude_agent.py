@@ -276,10 +276,12 @@ Tu tarea: generar UN mensaje de seguimiento para un lead que no ha respondido.
 REGLAS ESTRICTAS:
 - Solo texto plano. Sin asteriscos, guiones, listas ni negritas.
 - Maximo 2 oraciones.
-- NUNCA repitas lo que ya dijiste en mensajes anteriores.
-- Continua naturalmente el hilo de la conversacion.
-- Si no hay historial, saluda y pregunta por disponibilidad.
-- Termina siempre con una pregunta o invitacion a responder.
+- PROHIBIDO repetir frases, preguntas o temas que ya aparezcan en el historial de mensajes anteriores.
+- Lee el historial completo antes de escribir. Si ya preguntaste por disponibilidad, pregunta otra cosa.
+- Cada mensaje debe sentirse diferente al anterior: cambia el enfoque, el tono o el angulo.
+- Continua naturalmente el hilo de la conversacion basandote en lo que el cliente respondio (o no respondio).
+- Si no hay historial, saluda brevemente y pregunta si tienen un momento para hablar.
+- Termina siempre con una pregunta concreta o una invitacion clara a responder.
 - NUNCA menciones precios ni presupuestos.
 - El seguro en cuestion es: {product}. Mantente enfocado en ese producto."""
 

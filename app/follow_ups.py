@@ -9,7 +9,7 @@ from app.ghl_client import (
     get_opportunities, get_pipelines, send_whatsapp, send_sms, send_email, is_valid_email,
     get_contact, add_contact_tag, create_task, get_contact_channel
 )
-from app.supabase_client import check_reminder_sent, log_reminder_sent, get_conversation_history
+from app.supabase_client import check_reminder_sent, log_reminder_sent, get_conversation_history, save_conversation_message
 from app.claude_agent import get_ai_followup
 
 ET = pytz.timezone("America/New_York")
@@ -21,9 +21,21 @@ PIPELINES = {
 }
 
 SKIP_STAGES = {
+    # Cerrados / finales
     "Won", "won",
     "DND",
     "Wrong number", "Wrong Number",
+    # New Lead: asesor llama 3 veces primero — bot en silencio
+    "New Lead", "New Leads",
+    # Asesor activo — no interferir
+    "HOT Leads", "Hot Lead",
+    "Appointment Booked",
+    "Quoted",
+    # Descartados — no contactar
+    "Not interested", "Not Interested", "Not Insterested",
+    "Not Eligible",
+    "Offer not accepted",
+    "REJECT",
 }
 
 ASESOR_ACTIVE_STAGES = {"Appointment Booked", "Quoted", "HOT Leads", "Hot Lead"}
@@ -531,9 +543,9 @@ async def run_follow_ups(force: bool = False):
             message = template.format(name=first_name) if template else ""
             followup_key_to_log = f"followup_{product}_{stage_name[:15]}"
             log_period = today.strftime("%Y-%m-%d")
-        # Use AI to generate contextual message if history exists, or stage is dynamic (required for dynamic stages)
+        # Use AI to generate contextual message — reads full conversation so it never repeats
         is_stage_dynamic = stage_config.get("dynamic", False)
-        conv_history = await get_conversation_history(contact_id, limit=5)
+        conv_history = await get_conversation_history(contact_id, limit=10)
         if conv_history or is_stage_dynamic:
             ai_msg = await get_ai_followup(contact_id, product, stage_name, first_name, lang)
             if ai_msg:
@@ -552,6 +564,12 @@ async def run_follow_ups(force: bool = False):
 
         success = await send_followup(contact_data, message, channel)
         if success:
+            # Guardar en historial de Supabase para que el AI no repita en próximos follow-ups
+            try:
+                await save_conversation_message(contact_id, "assistant", message)
+            except Exception as e:
+                print(f"[FollowUp] Warning: could not save message to history for {contact_id}: {e}")
+
             if stage_name in NO_ANSWER_STAGES:
                 email = contact_data.get("email", "") or ""
                 if email and is_valid_email(email):
