@@ -169,6 +169,9 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         # Inglés
         "not interested", "no thank you", "don't need", "dont need",
         "not right now", "maybe later", "no thanks",
+        # Opt-out / SMS unsubscribe keywords (GHL enables DND automatically on these)
+        "stop", "unsubscribe", "cancel", "opt out", "optout",
+        "remove me", "no more messages", "stop messages", "do not contact",
     ]
     already_insured_keywords = [
         # Español — frases completas

@@ -119,6 +119,15 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
     if msg_stripped in ("1", "2", "3", "4", "5") and await check_survey_pending(contact_id):
         await handle_survey_response(contact_id, contact_name, int(msg_stripped), channel)
         return
+
+    # Handle SMS opt-out keywords — GHL enables DND automatically, we just move the stage
+    _optout_words = {"stop", "unsubscribe", "cancel", "optout", "opt out",
+                     "remove me", "stop messages", "do not contact"}
+    if msg_stripped.lower().strip() in _optout_words or msg_stripped.lower().strip() == "stop":
+        await move_to_not_interested(contact_id)
+        print(f"[Webhook] OPT-OUT '{msg_stripped}' from {contact_name} — moved to Not Interested (DND handled by GHL)")
+        return  # No reply — GHL DND already blocks outbound
+
     # Pre-fetch pipeline so AI can give product-specific responses (e.g. already_insured)
     _, product = await get_contact_pipeline(contact_id)
 
