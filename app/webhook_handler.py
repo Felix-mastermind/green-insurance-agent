@@ -152,35 +152,46 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         print(f"[Webhook] {contact_name} wants call — HOT Lead + advisor notified")
 
     elif intent == "wants_appointment":
-        assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
+        # Only create appointment when client has given a specific day or time.
+        # If they just said "cita/programar" without day/time, bot already asked — wait.
         preferred_time = ai_result.get("preferred_time", "")
-        appt = await create_appointment(contact_id, contact_name, assigned_uid, preferred_time)
-        if appt.get("id") or appt.get("appointmentId"):
-            await move_to_appointment_booked(contact_id)
-            contact_info = await get_contact(contact_id)
-            phone = (contact_info or {}).get("phone", "") or ""
-            phone_str = " | Tel: " + phone if phone else ""
-            product_str = " | Seguro: " + product if product else ""
-            advisor_contact_id = AGENTS_CONTACTS.get(assigned_uid, "")
-            if in_hours:
-                msg = f"📅 Cita agendada | Lead: {contact_name}{phone_str}{product_str}. Revisa tu calendario."
-                if advisor_contact_id:
-                    await send_sms(advisor_contact_id, msg)
-                await send_sms(BARBARA_CONTACT_ID, msg)
-                print(f"[Webhook] {contact_name} appointment booked (in hours) — advisor notified")
-            else:
-                reminder_time = next_business_opening()
-                job_id = f"reminder_{contact_id}_{int(reminder_time.timestamp())}"
-                scheduler.add_job(
-                    send_advisor_next_day_reminder,
-                    "date",
-                    run_date=reminder_time,
-                    id=job_id,
-                    replace_existing=True,
-                    args=[advisor_contact_id or BARBARA_CONTACT_ID, assigned_uid,
-                          contact_name, contact_id, preferred_time, product or ""],
-                )
-                print(f"[Webhook] {contact_name} appointment booked (out of hours) — reminder at {reminder_time.strftime('%Y-%m-%d %I:%M %p ET')}")
+        _time_indicators = [
+            "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes",
+            "mañana", "manana", "pasado", "monday", "tuesday", "wednesday",
+            "thursday", "friday", "saturday", "tomorrow", "am", "pm", ":",
+        ]
+        _has_time = any(w in preferred_time.lower() for w in _time_indicators)
+        if not _has_time:
+            print(f"[Webhook] {contact_name} wants appointment but no day/time yet — waiting for client to specify")
+        else:
+            assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
+            appt = await create_appointment(contact_id, contact_name, assigned_uid, preferred_time)
+            if appt.get("id") or appt.get("appointmentId"):
+                await move_to_appointment_booked(contact_id)
+                contact_info = await get_contact(contact_id)
+                phone = (contact_info or {}).get("phone", "") or ""
+                phone_str = " | Tel: " + phone if phone else ""
+                product_str = " | Seguro: " + product if product else ""
+                advisor_contact_id = AGENTS_CONTACTS.get(assigned_uid, "")
+                if in_hours:
+                    msg = f"📅 Cita agendada | Lead: {contact_name}{phone_str}{product_str}. Revisa tu calendario."
+                    if advisor_contact_id:
+                        await send_sms(advisor_contact_id, msg)
+                    await send_sms(BARBARA_CONTACT_ID, msg)
+                    print(f"[Webhook] {contact_name} appointment booked (in hours) — advisor notified")
+                else:
+                    reminder_time = next_business_opening()
+                    job_id = f"reminder_{contact_id}_{int(reminder_time.timestamp())}"
+                    scheduler.add_job(
+                        send_advisor_next_day_reminder,
+                        "date",
+                        run_date=reminder_time,
+                        id=job_id,
+                        replace_existing=True,
+                        args=[advisor_contact_id or BARBARA_CONTACT_ID, assigned_uid,
+                              contact_name, contact_id, preferred_time, product or ""],
+                    )
+                    print(f"[Webhook] {contact_name} appointment booked (out of hours) — reminder at {reminder_time.strftime('%Y-%m-%d %I:%M %p ET')}")
 
     elif intent == "wrong_number":
         await move_to_wrong_number(contact_id)
