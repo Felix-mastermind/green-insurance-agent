@@ -195,13 +195,24 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         await save_conversation_message(contact_id, "assistant", reply)
         return {"response": reply, "should_transfer": False, "intent": "not_interested", "preferred_time": ""}
 
-    # Detect language — if message contains common English words, respond in English
-    english_indicators = [
-        "hello", "hi ", "hey ", "i ", "i'm", "i am", "my ", "me ", "we ", "do you",
-        "can you", "want", "need", "please", "thanks", "thank you", "yes", "no ",
-        "what", "how", "where", "when", "is ", "are ", "have ", "has ", "the ", "and "
+    # Detect language — default Spanish, switch to English only if clearly English
+    # Check Spanish first: if Spanish words present, always respond in Spanish
+    spanish_indicators = [
+        "hola", "gracias", "que ", "como ", "cómo", "por favor", "buenos", "buenas",
+        "tengo", "necesito", "quiero", "puedo", "puede", "para ", "con ", "del ",
+        "los ", "las ", "una ", "uno ", "estoy", "soy ", "este", "seguro", "favor",
+        "plis", "pliss", "porfa", "quisiera", "interesa", "lugares", "información",
+        "informacion", "también", "tambien", "cuánto", "cuanto", "dónde", "donde",
     ]
-    is_english = any(ind in f" {msg_lower} " for ind in english_indicators)
+    # English indicators — only unambiguous English words (avoid "me", "no", "si", etc.)
+    english_indicators = [
+        "hello", "hi ", "hey ", " i ", "i'm", "i am", "my name", "do you",
+        "can you", "please", "thanks", "thank you",
+        "what is", "how much", "where is", "when can", "the insurance",
+    ]
+    padded = f" {msg_lower} "
+    is_spanish = any(ind in padded for ind in spanish_indicators)
+    is_english = (not is_spanish) and any(ind in padded for ind in english_indicators)
     system_prompt = SYSTEM_PROMPT_ES
 
     # Inyectar contexto de horario para que el AI sepa cómo cerrar
