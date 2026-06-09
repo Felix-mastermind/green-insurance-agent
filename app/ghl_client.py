@@ -375,30 +375,79 @@ async def is_bot_paused(contact_id: str) -> bool:
 BOT_USER_ID = "rM9FFKJ79TshgMmOZ7Nn"
 
 async def send_sms(contact_id: str, message: str) -> dict:
-    """Send SMS to a contact as Asistente Green."""
+    """Send SMS to a contact as Asistente Green.
+    Uses conversationId as primary key so GHL respects userId attribution.
+    """
     conv_id = await get_contact_conversation_id(contact_id)
-    payload = {
-        "type": "SMS",
-        "contactId": contact_id,
-        "message": message,
-        "userId": BOT_USER_ID,
-    }
     if conv_id:
-        payload["conversationId"] = conv_id
-    return await request_ghl("POST", "/conversations/messages", json=payload)
+        # Preferred: conversationId only — GHL respects userId when contactId is absent
+        payload = {
+            "type": "SMS",
+            "conversationId": conv_id,
+            "contactId": contact_id,
+            "message": message,
+            "userId": BOT_USER_ID,
+        }
+    else:
+        # Fallback: contactId only (GHL may attribute to contact owner)
+        payload = {
+            "type": "SMS",
+            "contactId": contact_id,
+            "message": message,
+            "userId": BOT_USER_ID,
+        }
+    result = await request_ghl("POST", "/conversations/messages", json=payload)
+    logger.info("[GHL] SMS sent | convId=%s userId=%s | resp=%s",
+                conv_id or "none", BOT_USER_ID, str(result)[:120])
+    return result
+
 
 async def send_whatsapp(contact_id: str, message: str) -> dict:
-    """Send WhatsApp message to a contact as Asistente Green."""
+    """Send WhatsApp message to a contact as Asistente Green.
+    Uses conversationId as primary key so GHL respects userId attribution.
+    """
     conv_id = await get_contact_conversation_id(contact_id)
-    payload = {
-        "type": "WhatsApp",
-        "contactId": contact_id,
-        "message": message,
-        "userId": BOT_USER_ID,
-    }
     if conv_id:
-        payload["conversationId"] = conv_id
-    return await request_ghl("POST", "/conversations/messages", json=payload)
+        payload = {
+            "type": "WhatsApp",
+            "conversationId": conv_id,
+            "contactId": contact_id,
+            "message": message,
+            "userId": BOT_USER_ID,
+        }
+    else:
+        payload = {
+            "type": "WhatsApp",
+            "contactId": contact_id,
+            "message": message,
+            "userId": BOT_USER_ID,
+        }
+    result = await request_ghl("POST", "/conversations/messages", json=payload)
+    logger.info("[GHL] WhatsApp sent | convId=%s userId=%s | resp=%s",
+                conv_id or "none", BOT_USER_ID, str(result)[:120])
+    return result
+
+
+async def add_bot_stamp(contact_id: str) -> None:
+    """Add a visible internal Activity note identifying the previous message as bot-sent.
+    This lets advisors distinguish bot messages from their own in the GHL conversation view.
+    """
+    try:
+        conv_id = await get_contact_conversation_id(contact_id)
+        if not conv_id:
+            return
+        await request_ghl(
+            "POST",
+            "/conversations/messages",
+            json={
+                "type": "Activity",
+                "conversationId": conv_id,
+                "html": "<p>🤖 <strong>Asistente Green</strong> — mensaje automático</p>",
+                "body": "🤖 Asistente Green — mensaje automático",
+            }
+        )
+    except Exception as e:
+        logger.warning("[GHL] Could not add bot stamp for %s: %s", contact_id, e)
 
 # HOT Leads stage IDs per pipeline
 HOT_LEADS_STAGES = {

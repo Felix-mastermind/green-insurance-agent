@@ -7,7 +7,7 @@ import pytz
 from datetime import datetime, timedelta
 from app.ghl_client import (
     get_opportunities, get_pipelines, send_whatsapp, send_sms, send_email, is_valid_email,
-    get_contact, add_contact_tag, create_task, get_contact_channel
+    get_contact, add_contact_tag, create_task, get_contact_channel, add_bot_stamp
 )
 from app.supabase_client import check_reminder_sent, log_reminder_sent, get_conversation_history, save_conversation_message
 from app.claude_agent import get_ai_followup
@@ -338,7 +338,10 @@ async def send_followup(contact: dict, message: str, channel: str = "WhatsApp") 
             result = await send_sms(contact_id, message)
         else:
             result = await send_whatsapp(contact_id, message)
-        return bool(result.get("conversationId") or result.get("id") or result.get("messageId"))
+        success = bool(result.get("conversationId") or result.get("id") or result.get("messageId"))
+        if success:
+            await add_bot_stamp(contact_id)
+        return success
     except Exception as e:
         print(f"[FollowUp] Error sending to {contact_id}: {e}")
         return False
