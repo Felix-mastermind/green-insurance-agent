@@ -249,7 +249,13 @@ async def get_contact(contact_id: str) -> Optional[dict]:
     return data.get("contact")
 
 async def get_contact_channel(contact_id: str) -> str:
-    """Get the actual channel type of the contact's main conversation"""
+    """Get the messaging channel for a contact (SMS or WhatsApp).
+
+    Priority order:
+    1. Conversation inbox type (most reliable — reflects the channel the lead opted in from)
+    2. lastMessageType (only if it's SMS or WhatsApp, ignoring calls/emails/activities)
+    3. Default: SMS (safer fallback — avoids sending WhatsApp when not enabled)
+    """
     try:
         _, location_id = get_ghl_config()
         data = await request_ghl(
@@ -259,24 +265,35 @@ async def get_contact_channel(contact_id: str) -> str:
         )
         convs = extract_items(data, "conversations")
         if not convs:
-            return "WhatsApp"
+            return "SMS"
         conv = convs[0]
-        # GHL conversation type field
-        # Use lastMessageType — most reliable indicator of channel
-        last_msg_type = conv.get("lastMessageType", "") or conv.get("type", "") or ""
-        logger.info("[GHL] lastMessageType for %s: %s", contact_id, last_msg_type)
+
+        # 1. Check inbox channel type — most reliable
+        inbox_id = str(conv.get("inboxId", "") or "")
+        channel_type = str(conv.get("channel", "") or conv.get("channelType", "") or "").upper()
+        if "WHATSAPP" in channel_type:
+            logger.info("[GHL] Channel=WhatsApp (from channelType) for %s", contact_id)
+            return "WhatsApp"
+        if "SMS" in channel_type:
+            logger.info("[GHL] Channel=SMS (from channelType) for %s", contact_id)
+            return "SMS"
+
+        # 2. Check lastMessageType — but ONLY for SMS/WhatsApp messages (skip calls/activities)
+        last_msg_type = conv.get("lastMessageType", "") or ""
         last_upper = str(last_msg_type).upper()
+        logger.info("[GHL] lastMessageType for %s: %s | inboxId=%s", contact_id, last_msg_type, inbox_id)
+
         if "SMS" in last_upper or last_msg_type in ("1", 1, "TYPE_SMS"):
             return "SMS"
         if "WHATSAPP" in last_upper or last_msg_type in (19, "19", 7, "7", "TYPE_WHATSAPP"):
             return "WhatsApp"
-        if "EMAIL" in last_upper:
-            return "Email"
-        # Default to WhatsApp (most common channel)
-        return "WhatsApp"
+
+        # 3. Default: SMS — safer than WhatsApp (WhatsApp may not be enabled for all contacts)
+        logger.info("[GHL] Channel unknown for %s (type=%s) — defaulting to SMS", contact_id, last_msg_type)
+        return "SMS"
     except Exception as e:
         logger.error("[GHL] Error getting channel for %s: %s", contact_id, e)
-        return "WhatsApp"
+        return "SMS"
 
 async def get_contact_conversation_id(contact_id: str) -> str:
     """Get the main conversation ID for a contact"""

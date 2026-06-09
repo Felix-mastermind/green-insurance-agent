@@ -305,7 +305,7 @@ def extract_channel(payload: dict) -> str:
         t = msg.get("type", "") or msg.get("channel", "")
         if t and isinstance(t, str) and t.upper() in ("SMS", "WHATSAPP", "EMAIL"):
             return t.upper()
-    return "WhatsApp"  # default to WhatsApp since that's the main channel
+    return ""  # unknown — let get_contact_channel() decide via GHL API
 
 
 def extract_contact_name(payload: dict) -> str:
@@ -370,8 +370,15 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
                 print(f"[Webhook] SKIPPED — {contact_name} ({contact_id}) is in 'New Lead' stage, bot stays silent")
                 return {"status": "ok", "event": "skipped_new_lead"}
 
-            # Get the real channel from GHL conversation
-            channel = await get_contact_channel(contact_id)
+            # Determine channel: use payload first, fall back to GHL API
+            # The payload channel is the most accurate since it comes from the inbound event
+            payload_channel = extract_channel(payload)
+            if payload_channel in ("SMS", "WHATSAPP", "WhatsApp"):
+                channel = "SMS" if payload_channel == "SMS" else "WhatsApp"
+                print(f"[Webhook] Channel from payload: {channel}")
+            else:
+                channel = await get_contact_channel(contact_id)
+                print(f"[Webhook] Channel from GHL API: {channel}")
 
             # If message body not in payload, fetch from GHL API
             if not message_body:
