@@ -154,8 +154,21 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         "se equivocaron", "wrong person", "no soy", "not me"
     ]
     not_interested_keywords = [
-        "no me interesa", "no estoy interesado", "not interested", "no gracias",
-        "no thank you", "no necesito", "don't need", "dont need",
+        # Español — variantes directas
+        "no me interesa", "no estoy interesado", "no interesado", "no gracias",
+        "no necesito", "no quiero", "no por favor",
+        # Variantes "por el momento / ahora"
+        "por el momento", "por ahora no", "ahorita no", "no por ahora",
+        "no por el momento", "en este momento no", "al momento no",
+        "de momento no", "por los momentos", "no en este momento",
+        "por el momento no", "no por el momento gracias",
+        # Rechazo suave
+        "no estoy interesada", "no me interesaria", "no me interesaría",
+        "no está en mis planes", "no esta en mis planes",
+        "no lo necesito", "no aplica", "no aplica para mi",
+        # Inglés
+        "not interested", "no thank you", "don't need", "dont need",
+        "not right now", "maybe later", "no thanks",
     ]
     already_insured_keywords = [
         "ya tengo seguro", "tengo seguro", "ya tengo uno", "ya tengo un seguro",
@@ -253,6 +266,15 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         ]
         ai_lower = ai_text.lower()
 
+        # Detect not_interested from AI response as fallback
+        # (catches soft rejections the keyword list may have missed)
+        not_interested_ai_kw = [
+            "gracias por tu tiempo", "si en el futuro necesitas",
+            "aqui estaremos", "aquí estaremos", "que tengas un buen",
+            "if you ever need", "feel free to reach out",
+            "good luck", "take care", "cuídate", "cuitate",
+        ]
+
         if any(w in msg_lower for w in wants_call_kw):
             intent = "wants_call"
         elif any(w in msg_lower for w in wants_appt_kw) or (
@@ -288,6 +310,10 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
                 preferred_time = mentioned_type  # reuse field to carry target product
             elif any(w in msg_lower for w in ["dental", "salud", "health", "auto", "vida", "life"]):
                 intent = "product_interest"
+
+        # Fallback: if AI said goodbye/farewell → not_interested (soft rejection)
+        if intent == "general" and any(w in ai_lower for w in not_interested_ai_kw):
+            intent = "not_interested"
 
         return {
             "response": ai_text,
