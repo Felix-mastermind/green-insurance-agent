@@ -171,9 +171,17 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         "not right now", "maybe later", "no thanks",
     ]
     already_insured_keywords = [
-        "ya tengo seguro", "tengo seguro", "ya tengo uno", "ya tengo un seguro",
+        # Español — frases completas
+        "ya tengo seguro", "tengo seguro", "ya tengo un seguro", "tengo un seguro",
+        "ya tengo cobertura", "tengo cobertura", "ya estoy asegurado", "ya estoy asegurada",
+        "ya tengo uno", "ya tengo una",
+        # Frases cortas comunes
+        "ya tengo", "ya lo tengo", "ya tenemos", "tenemos seguro",
+        "ya cuento con", "cuento con seguro",
+        # Inglés
         "already have insurance", "already insured", "i have insurance",
         "i have coverage", "i'm already covered", "already covered",
+        "i have a policy", "have insurance",
     ]
     if any(kw in msg_lower for kw in wrong_number_keywords):
         reply = "Entiendo, disculpa la molestia."
