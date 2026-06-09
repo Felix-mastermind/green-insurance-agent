@@ -239,6 +239,31 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     is_english = (not is_spanish) and any(ind in padded for ind in english_indicators)
     system_prompt = SYSTEM_PROMPT_ES
 
+    # First contact — inject intro instruction so bot presents itself before qualifying
+    is_first_contact = len(history) == 0
+    name_hint = contact_name.split()[0] if contact_name else ""
+    if is_first_contact:
+        if is_english:
+            system_prompt += (
+                f"\n\nFIRST MESSAGE: This is the very first message from this lead. "
+                f"Start your reply by introducing yourself BRIEFLY before asking the qualifying question. "
+                f"Example (adapt freely): "
+                f"'Hi{' ' + name_hint if name_hint else ''}! I'm the virtual assistant for Green Insurance 😊 "
+                f"I'm here to help you find the best insurance for you and your family — "
+                f"we offer health, dental, auto, life, and commercial insurance across multiple states. "
+                f"[Then ask the qualifying question]'"
+            )
+        else:
+            system_prompt += (
+                f"\n\nPRIMER MENSAJE: Este es el primer mensaje de este lead. "
+                f"Comienza tu respuesta presentandote BREVEMENTE antes de hacer la pregunta de calificacion. "
+                f"Ejemplo (adapta libremente): "
+                f"'Hola{' ' + name_hint if name_hint else ''}! Soy el Asistente Virtual de Green Insurance 😊 "
+                f"Estoy aqui para ayudarte a encontrar el mejor seguro para ti y tu familia. "
+                f"Trabajamos con seguros de salud, dental, auto, vida y comercial en varios estados. "
+                f"[Luego haz la pregunta de calificacion]'"
+            )
+
     # Inyectar contexto de horario para que el AI sepa cómo cerrar
     if not business_hours:
         system_prompt += "\n\nHORARIO: FUERA DE OFICINA — Aplica el PASO 3 FUERA DE HORARIO. No digas que un asesor llamara ahora. Pide la hora preferida para manana."
