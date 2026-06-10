@@ -251,30 +251,51 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     is_english = (not is_spanish) and any(ind in padded for ind in english_indicators)
     system_prompt = SYSTEM_PROMPT_ES
 
-    # First contact — inject intro instruction so bot presents itself before qualifying
+    # First contact — inject intro + product context so bot doesn't ask what they already told us
     is_first_contact = len(history) == 0
     name_hint = contact_name.split()[0] if contact_name else ""
+    product_known = product.strip().lower() if product else ""
+
     if is_first_contact:
-        if is_english:
-            system_prompt += (
-                f"\n\nFIRST MESSAGE: This is the very first message from this lead. "
-                f"Start your reply by introducing yourself BRIEFLY before asking the qualifying question. "
-                f"Example (adapt freely): "
-                f"'Hi{' ' + name_hint if name_hint else ''}! I'm the virtual assistant for Green Insurance 😊 "
-                f"I'm here to help you find the best insurance for you and your family — "
-                f"we offer health, dental, auto, life, and commercial insurance across multiple states. "
-                f"[Then ask the qualifying question]'"
-            )
+        if product_known:
+            # Client already filled a form — we know their product. Skip PASO 1, confirm directly.
+            if is_english:
+                system_prompt += (
+                    f"\n\nFIRST MESSAGE + PRODUCT KNOWN: The client filled out a form and is already in "
+                    f"the '{product}' pipeline — we already know what they want. "
+                    f"DO NOT ask what type of insurance they need. "
+                    f"Instead, introduce yourself briefly and CONFIRM the product. Example: "
+                    f"'Hi{' ' + name_hint if name_hint else ''}! I'm the Green Insurance virtual assistant 😊 "
+                    f"I see you're interested in {product} insurance — is that right? "
+                    f"[Then go straight to PASO 2 questions for {product}]'"
+                )
+            else:
+                system_prompt += (
+                    f"\n\nPRIMER MENSAJE + PRODUCTO CONOCIDO: El cliente ya lleno un formulario y esta en el "
+                    f"pipeline de '{product}' — ya sabemos que tipo de seguro quiere. "
+                    f"NO le preguntes que tipo de seguro necesita — eso ya lo sabemos. "
+                    f"En cambio, presentate brevemente y CONFIRMA el producto directamente. Ejemplo: "
+                    f"'Hola{' ' + name_hint if name_hint else ''}! Soy el Asistente Virtual de Green Insurance 😊 "
+                    f"Veo que estas interesado en seguro de {product}, es correcto? "
+                    f"[Luego ve directo a las preguntas del PASO 2 para {product}]'"
+                )
         else:
-            system_prompt += (
-                f"\n\nPRIMER MENSAJE: Este es el primer mensaje de este lead. "
-                f"Comienza tu respuesta presentandote BREVEMENTE antes de hacer la pregunta de calificacion. "
-                f"Ejemplo (adapta libremente): "
-                f"'Hola{' ' + name_hint if name_hint else ''}! Soy el Asistente Virtual de Green Insurance 😊 "
-                f"Estoy aqui para ayudarte a encontrar el mejor seguro para ti y tu familia. "
-                f"Trabajamos con seguros de salud, dental, auto, vida y comercial en varios estados. "
-                f"[Luego haz la pregunta de calificacion]'"
-            )
+            # No product info — ask normally
+            if is_english:
+                system_prompt += (
+                    f"\n\nFIRST MESSAGE: Introduce yourself briefly, then ask what type of insurance "
+                    f"they need. Example: 'Hi{' ' + name_hint if name_hint else ''}! "
+                    f"I'm the Green Insurance virtual assistant 😊 "
+                    f"I'm here to help you find the best coverage. "
+                    f"What type of insurance are you interested in?'"
+                )
+            else:
+                system_prompt += (
+                    f"\n\nPRIMER MENSAJE: Presentate brevemente y pregunta el tipo de seguro. Ejemplo: "
+                    f"'Hola{' ' + name_hint if name_hint else ''}! Soy el Asistente Virtual de Green Insurance 😊 "
+                    f"Estoy aqui para ayudarte a encontrar el mejor seguro. "
+                    f"En que tipo de seguro estas interesado?'"
+                )
 
     # Inyectar contexto de horario para que el AI sepa cómo cerrar
     if not business_hours:
