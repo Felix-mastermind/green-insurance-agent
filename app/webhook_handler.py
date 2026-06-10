@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
 from app.scheduler import scheduler, ET
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, create_opportunity, CROSS_SELL_PIPELINES, AGENTS_CONTACTS, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities, is_bot_paused, add_bot_stamp
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, create_opportunity, CROSS_SELL_PIPELINES, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities, is_bot_paused, add_bot_stamp
 from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
 
 router = APIRouter()
@@ -45,19 +45,22 @@ def next_business_opening() -> datetime:
     return candidate
 
 
-async def send_advisor_next_day_reminder(advisor_contact_id: str, advisor_uid: str,
-                                          contact_name: str, contact_id: str,
-                                          preferred_time: str, product: str):
-    """Envía texto al asesor recordándole que debe llamar al lead."""
+async def send_advisor_next_day_reminder(contact_id: str, advisor_uid: str,
+                                          contact_name: str, preferred_time: str, product: str):
+    """Internal note on lead's conversation + SMS to Barbara as reminder for the advisor."""
     ghl_link = f"https://app.gohighlevel.com/contacts/{contact_id}"
     product_str = f" | Seguro: {product}" if product else ""
     time_str = f" a las {preferred_time}" if preferred_time else " en el horario acordado"
-    msg = (
+    note_text = (
+        f"📞 RECORDATORIO DE CITA — {contact_name}{time_str}{product_str}. "
+        f"El cliente agendó llamada para hoy. {ghl_link}"
+    )
+    await add_internal_note(contact_id, note_text)
+    barbara_msg = (
         f"📞 Recordatorio de llamada: {contact_name}{time_str}{product_str}. "
         f"El cliente agendó llamada para hoy. Ver lead: {ghl_link}"
     )
-    await send_sms(advisor_contact_id, msg)
-    await send_sms(BARBARA_CONTACT_ID, msg)
+    await send_sms(BARBARA_CONTACT_ID, barbara_msg)
     print(f"[Reminder] Sent next-day reminder for {contact_name} to advisor {advisor_uid}")
 
 
@@ -119,17 +122,26 @@ def _cancel_job(job_id: str) -> None:
 
 
 async def notify_advisor_no_reply(contact_id: str, contact_name: str, product: str, assigned_uid: str) -> None:
-    """Notify advisor when client hasn't replied to bot message within 5 minutes."""
+    """Notify advisor when client hasn't replied to bot message within 5 minutes.
+    Posts an internal Activity note on the LEAD's conversation so the advisor sees it
+    in context — avoids SMS routing to wrong conversations.
+    """
     ghl_link = f"https://app.gohighlevel.com/contacts/{contact_id}"
     product_str = f" | Seguro: {product}" if product else ""
-    msg = (
+
+    # Internal note on the LEAD's conversation (advisor sees it in context)
+    note_text = (
+        f"⏰ SIN RESPUESTA — {contact_name}{product_str} no ha respondido el mensaje del bot "
+        f"en los ultimos 5 min. Considera hacer seguimiento manual. {ghl_link}"
+    )
+    await add_internal_note(contact_id, note_text)
+
+    # SMS to Barbara as backup alert
+    barbara_msg = (
         f"⏰ Sin respuesta: {contact_name}{product_str} no ha respondido el mensaje del bot "
         f"en los ultimos 5 min. Considera hacer seguimiento manual: {ghl_link}"
     )
-    advisor_contact_id = AGENTS_CONTACTS.get(assigned_uid, "")
-    if advisor_contact_id:
-        await send_sms(advisor_contact_id, msg)
-    await send_sms(BARBARA_CONTACT_ID, msg)
+    await send_sms(BARBARA_CONTACT_ID, barbara_msg)
     print(f"[Scheduler] No-reply notification sent for {contact_name}")
 
 
@@ -218,12 +230,11 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
                 phone = (contact_info or {}).get("phone", "") or ""
                 phone_str = " | Tel: " + phone if phone else ""
                 product_str = " | Seguro: " + product if product else ""
-                advisor_contact_id = AGENTS_CONTACTS.get(assigned_uid, "")
                 if in_hours:
-                    msg = f"📅 Cita agendada | Lead: {contact_name}{phone_str}{product_str}. Revisa tu calendario."
-                    if advisor_contact_id:
-                        await send_sms(advisor_contact_id, msg)
-                    await send_sms(BARBARA_CONTACT_ID, msg)
+                    ghl_link = f"https://app.gohighlevel.com/contacts/{contact_id}"
+                    note_text = f"📅 CITA AGENDADA — {contact_name}{phone_str}{product_str}. Revisa tu calendario. {ghl_link}"
+                    await add_internal_note(contact_id, note_text)
+                    await send_sms(BARBARA_CONTACT_ID, f"📅 Cita agendada | Lead: {contact_name}{phone_str}{product_str}. Revisa calendario: {ghl_link}")
                     print(f"[Webhook] {contact_name} appointment booked (in hours) — advisor notified")
                 else:
                     reminder_time = next_business_opening()
@@ -234,8 +245,7 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
                         run_date=reminder_time,
                         id=job_id,
                         replace_existing=True,
-                        args=[advisor_contact_id or BARBARA_CONTACT_ID, assigned_uid,
-                              contact_name, contact_id, preferred_time, product or ""],
+                        args=[contact_id, assigned_uid, contact_name, preferred_time, product or ""],
                     )
                     print(f"[Webhook] {contact_name} appointment booked (out of hours) — reminder at {reminder_time.strftime('%Y-%m-%d %I:%M %p ET')}")
 

@@ -324,8 +324,8 @@ async def add_internal_note(contact_id: str, note: str) -> dict:
             json={
                 "type": "Activity",
                 "conversationId": conv_id,
-                "html": f"<p>🤖 <strong>Agente IA:</strong> {note}</p>",
-                "body": f"🤖 Agente IA: {note}",
+                "html": f"<p>{note}</p>",
+                "body": note,
             }
         )
     except Exception as e:
@@ -847,23 +847,26 @@ async def get_opportunity_assigned_user(contact_id: str) -> str:
     return ""
 
 async def notify_advisor_call_requested(contact_id: str, contact_name: str, assigned_user_id: str, product: str = "") -> None:
-    """Notify assigned advisor + Barbara that client wants immediate call"""
+    """Notify assigned advisor + Barbara that client wants immediate call.
+    Uses an internal Activity note on the LEAD's conversation so it appears in context
+    for the assigned advisor — avoids SMS routing to wrong conversations.
+    """
     try:
         contact_data = await get_contact(contact_id)
         phone = (contact_data or {}).get("phone", "") or ""
     except Exception:
         phone = ""
-    phone_str = " | Tel: " + phone if phone else ""
-    product_str = " | Seguro: " + product if product else ""
-    msg = f"📞 Lead: {contact_name}{phone_str}{product_str}. Quiere que lo llamen ahora. Por favor llamalo lo antes posible."
+    phone_str = f" | Tel: {phone}" if phone else ""
+    product_str = f" | Seguro: {product}" if product else ""
+    ghl_link = f"https://app.gohighlevel.com/contacts/{contact_id}"
 
-    # Notify assigned advisor
-    advisor_contact_id = AGENTS_CONTACTS.get(assigned_user_id, "")
-    if advisor_contact_id:
-        await send_sms(advisor_contact_id, msg)
+    # Internal note on the LEAD's conversation (advisor sees it in context)
+    note_text = f"📞 LLAMADA SOLICITADA — {contact_name}{phone_str}{product_str}. El cliente quiere que lo llamen AHORA. {ghl_link}"
+    await add_internal_note(contact_id, note_text)
 
-    # Always notify Barbara
-    await send_sms(BARBARA_CONTACT_ID, msg)
+    # SMS to Barbara as backup alert
+    barbara_msg = f"📞 Lead: {contact_name}{phone_str}{product_str}. Quiere que lo llamen ahora. Por favor avisa al asesor asignado: {ghl_link}"
+    await send_sms(BARBARA_CONTACT_ID, barbara_msg)
 
 async def create_appointment(contact_id: str, contact_name: str, assigned_user_id: str,
                               preferred_time_str: str, calendar_id: str = "") -> dict:
