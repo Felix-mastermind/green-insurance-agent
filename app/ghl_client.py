@@ -811,11 +811,13 @@ async def get_contact_pipeline(contact_id: str) -> tuple[str, str]:
     return "", ""
 
 BARBARA_CONTACT_ID = "Fr2WbOMJcsnKPC01S0Dz"
-NANCY_CONTACT_ID   = "mUef4ywsxG8deYKYioW5"   # Nancy Martinez (supervisora Mastermind)
 
 PIPELINE_AUTO_MASTERMIND = "BdzkOH5twVi9sCK2ag96"
 PIPELINE_LIFE            = "XrTzKSNz9VpYuSvVZzyH"
 PIPELINE_DENTAL          = "HzCwe9SCtirKXGFdFLVT"
+
+# GHL user IDs for staff (used for task assignment — never contact IDs)
+NANCY_USER_ID = "crgvDrxKXD1o7ceciD6u"   # Nancy Martinez (supervisora Mastermind)
 
 AGENTS_CONTACTS = {
     "RGSzf4hQ3OvSTYPcVaYT": "pagwWiwwr7OEGJP08bCc",   # Allison Herrera
@@ -825,31 +827,26 @@ AGENTS_CONTACTS = {
     "axXwrCLjvTuDMBSiMoPa": "WGiwNgCRyB2dlUC7ipjj",   # Sharon Jones
 }
 
-async def get_notification_sms_recipients(contact_id: str, assigned_uid: str) -> list:
-    """Return list of contact IDs that should receive advisor SMS alerts.
-    - Auto Mastermind: assigned advisor + Nancy Martinez
-    - Life / Dental:   Barbara only
-    - Other:           Barbara only
+async def notify_mastermind_staff(contact_id: str, task_title: str, assigned_uid: str) -> None:
+    """For Auto Mastermind leads: create a GHL task assigned to the advisor + one for Nancy.
+    Uses task assignment (user ID) — never SMS to contact IDs — so it goes to staff, not clients.
     """
-    pipeline_id = ""
+    # Task for the assigned advisor
+    if assigned_uid:
+        await create_task(contact_id, task_title, assigned_to=assigned_uid, due_hours=0)
+    # Task for Nancy Martinez (supervisora) only if she's not already the assigned advisor
+    if assigned_uid != NANCY_USER_ID:
+        await create_task(contact_id, task_title, assigned_to=NANCY_USER_ID, due_hours=0)
+
+async def get_notification_recipients(contact_id: str, assigned_uid: str) -> str:
+    """Return pipeline_id for the contact's first opportunity (used for routing decisions)."""
     try:
         opps = await get_contact_opportunities(contact_id)
         if opps:
-            pipeline_id = opps[0].get("pipelineId", "")
+            return opps[0].get("pipelineId", "")
     except Exception:
         pass
-
-    if pipeline_id == PIPELINE_AUTO_MASTERMIND:
-        recipients = []
-        advisor_cid = AGENTS_CONTACTS.get(assigned_uid, "")
-        if advisor_cid and advisor_cid != BARBARA_CONTACT_ID:
-            recipients.append(advisor_cid)
-        if NANCY_CONTACT_ID not in recipients:
-            recipients.append(NANCY_CONTACT_ID)
-        return recipients or [BARBARA_CONTACT_ID]
-
-    # Life, Dental, and all other pipelines → Barbara only
-    return [BARBARA_CONTACT_ID]
+    return ""
 
 AGENTS_CALENDARS = {
     "RGSzf4hQ3OvSTYPcVaYT": "91JNjAkaA3SB1h8U5Dmu",   # Allison Herrera
@@ -895,11 +892,14 @@ async def notify_advisor_call_requested(contact_id: str, contact_name: str, assi
     note_text = f"📞 LLAMADA SOLICITADA — {contact_name}{phone_str}{product_str}. El cliente quiere que lo llamen AHORA. {ghl_link}"
     await add_internal_note(contact_id, note_text)
 
-    # SMS routing based on pipeline
     alert_msg = f"📞 Lead: {contact_name}{phone_str}{product_str}. Quiere que lo llamen ahora. Ver lead: {ghl_link}"
-    recipients = await get_notification_sms_recipients(contact_id, assigned_user_id)
-    for cid in recipients:
-        await send_sms(cid, alert_msg)
+    pipeline_id = await get_notification_recipients(contact_id, assigned_user_id)
+    if pipeline_id == PIPELINE_AUTO_MASTERMIND:
+        # Mastermind: task to advisor + task to Nancy (by user ID — never contact ID)
+        await notify_mastermind_staff(contact_id, alert_msg, assigned_user_id)
+    else:
+        # Life, Dental, other → SMS to Barbara
+        await send_sms(BARBARA_CONTACT_ID, alert_msg)
 
 async def create_appointment(contact_id: str, contact_name: str, assigned_user_id: str,
                               preferred_time_str: str, calendar_id: str = "") -> dict:

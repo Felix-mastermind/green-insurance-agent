@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
 from app.scheduler import scheduler, ET
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, create_opportunity, CROSS_SELL_PIPELINES, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities, is_bot_paused, add_bot_stamp, get_notification_sms_recipients
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, create_opportunity, CROSS_SELL_PIPELINES, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities, is_bot_paused, add_bot_stamp, notify_mastermind_staff, get_notification_recipients, PIPELINE_AUTO_MASTERMIND
 from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
 
 router = APIRouter()
@@ -60,9 +60,11 @@ async def send_advisor_next_day_reminder(contact_id: str, advisor_uid: str,
         f"📞 Recordatorio de llamada: {contact_name}{time_str}{product_str}. "
         f"El cliente agendó llamada para hoy. Ver lead: {ghl_link}"
     )
-    recipients = await get_notification_sms_recipients(contact_id, advisor_uid)
-    for cid in recipients:
-        await send_sms(cid, alert_msg)
+    pipeline_id = await get_notification_recipients(contact_id, advisor_uid)
+    if pipeline_id == PIPELINE_AUTO_MASTERMIND:
+        await notify_mastermind_staff(contact_id, alert_msg, advisor_uid)
+    else:
+        await send_sms(BARBARA_CONTACT_ID, alert_msg)
     print(f"[Reminder] Sent next-day reminder for {contact_name} to advisor {advisor_uid}")
 
 
@@ -138,14 +140,15 @@ async def notify_advisor_no_reply(contact_id: str, contact_name: str, product: s
     )
     await add_internal_note(contact_id, note_text)
 
-    # SMS routing based on pipeline
     alert_msg = (
         f"⏰ Sin respuesta: {contact_name}{product_str} no ha respondido el mensaje del bot "
         f"en los ultimos 5 min. Considera hacer seguimiento manual: {ghl_link}"
     )
-    recipients = await get_notification_sms_recipients(contact_id, assigned_uid)
-    for cid in recipients:
-        await send_sms(cid, alert_msg)
+    pipeline_id = await get_notification_recipients(contact_id, assigned_uid)
+    if pipeline_id == PIPELINE_AUTO_MASTERMIND:
+        await notify_mastermind_staff(contact_id, alert_msg, assigned_uid)
+    else:
+        await send_sms(BARBARA_CONTACT_ID, alert_msg)
     print(f"[Scheduler] No-reply notification sent for {contact_name}")
 
 
@@ -239,8 +242,11 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
                     note_text = f"📅 CITA AGENDADA — {contact_name}{phone_str}{product_str}. Revisa tu calendario. {ghl_link}"
                     await add_internal_note(contact_id, note_text)
                     alert_msg = f"📅 Cita agendada | Lead: {contact_name}{phone_str}{product_str}. Revisa calendario: {ghl_link}"
-                    for cid in await get_notification_sms_recipients(contact_id, assigned_uid):
-                        await send_sms(cid, alert_msg)
+                    pip_id = await get_notification_recipients(contact_id, assigned_uid)
+                    if pip_id == PIPELINE_AUTO_MASTERMIND:
+                        await notify_mastermind_staff(contact_id, alert_msg, assigned_uid)
+                    else:
+                        await send_sms(BARBARA_CONTACT_ID, alert_msg)
                     print(f"[Webhook] {contact_name} appointment booked (in hours) — advisor notified")
                 else:
                     reminder_time = next_business_opening()
