@@ -816,27 +816,52 @@ PIPELINE_AUTO_MASTERMIND = "BdzkOH5twVi9sCK2ag96"
 PIPELINE_LIFE            = "XrTzKSNz9VpYuSvVZzyH"
 PIPELINE_DENTAL          = "HzCwe9SCtirKXGFdFLVT"
 
-# GHL user IDs for staff (used for task assignment — never contact IDs)
-NANCY_USER_ID = "crgvDrxKXD1o7ceciD6u"   # Nancy Martinez (supervisora Mastermind)
+NANCY_USER_ID    = "crgvDrxKXD1o7ceciD6u"  # Nancy Martinez staff user ID
+NANCY_PHONE      = "+17708424199"            # Nancy Martinez staff phone number
+
+# Cache: resolved at runtime via search_contacts to avoid hardcoding a client's contact ID
+_nancy_contact_id_cache: str = ""
+
+async def get_nancy_contact_id() -> str:
+    """Lookup Nancy Martinez's GHL contact ID by her staff phone number (cached after first call)."""
+    global _nancy_contact_id_cache
+    if _nancy_contact_id_cache:
+        return _nancy_contact_id_cache
+    try:
+        results = await search_contacts(NANCY_PHONE)
+        for c in results:
+            if c.get("phone", "").replace(" ", "").replace("-", "") in NANCY_PHONE.replace("-", ""):
+                _nancy_contact_id_cache = c["id"]
+                logger.info("[GHL] Resolved Nancy contact ID: %s", _nancy_contact_id_cache)
+                return _nancy_contact_id_cache
+    except Exception as e:
+        logger.warning("[GHL] Could not resolve Nancy contact ID: %s", e)
+    return ""
 
 AGENTS_CONTACTS = {
     "RGSzf4hQ3OvSTYPcVaYT": "pagwWiwwr7OEGJP08bCc",   # Allison Herrera
     "XIWNWHYdv3OzZ7EsHbCu": "Fr2WbOMJcsnKPC01S0Dz",   # Barbara Quintero
-    "crgvDrxKXD1o7ceciD6u": "mUef4ywsxG8deYKYioW5",   # Nancy Martinez
+    "crgvDrxKXD1o7ceciD6u": "mUef4ywsxG8deYKYioW5",   # Nancy Martinez (may be client — use get_nancy_contact_id() instead)
     "6ElAdSHFu1hi0qopsDco": "oznzKcsK4X0cPyx0foii",    # Fatima Lopez
     "axXwrCLjvTuDMBSiMoPa": "WGiwNgCRyB2dlUC7ipjj",   # Sharon Jones
 }
 
-async def notify_mastermind_staff(contact_id: str, task_title: str, assigned_uid: str) -> None:
-    """For Auto Mastermind leads: create a GHL task assigned to the advisor + one for Nancy.
-    Uses task assignment (user ID) — never SMS to contact IDs — so it goes to staff, not clients.
+async def notify_mastermind_staff(contact_id: str, msg: str, assigned_uid: str) -> None:
+    """For Auto Mastermind leads: SMS to assigned advisor + SMS to Nancy Martinez (staff).
+    Nancy is looked up by her staff phone number to avoid sending to a same-name client.
     """
-    # Task for the assigned advisor
-    if assigned_uid:
-        await create_task(contact_id, task_title, assigned_to=assigned_uid, due_hours=0)
-    # Task for Nancy Martinez (supervisora) only if she's not already the assigned advisor
-    if assigned_uid != NANCY_USER_ID:
-        await create_task(contact_id, task_title, assigned_to=NANCY_USER_ID, due_hours=0)
+    # SMS to assigned advisor
+    advisor_cid = AGENTS_CONTACTS.get(assigned_uid, "")
+    if advisor_cid and advisor_cid != BARBARA_CONTACT_ID:
+        await send_sms(advisor_cid, msg)
+
+    # SMS to Nancy using her staff phone lookup
+    nancy_cid = await get_nancy_contact_id()
+    if nancy_cid and nancy_cid != advisor_cid:
+        await send_sms(nancy_cid, msg)
+    elif not nancy_cid:
+        # Fallback to Barbara if Nancy's contact can't be resolved
+        await send_sms(BARBARA_CONTACT_ID, msg)
 
 async def get_notification_recipients(contact_id: str, assigned_uid: str) -> str:
     """Return pipeline_id for the contact's first opportunity (used for routing decisions)."""
