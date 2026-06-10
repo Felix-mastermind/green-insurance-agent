@@ -109,6 +109,30 @@ async def handle_survey_response(contact_id: str, contact_name: str, score: int,
         await send_sms(BARBARA_CONTACT_ID, barbara_msg)
         print(f"[Survey] ⚠️ {contact_name} calificó {score}/5 — mensaje de feedback + tarea a Barbara")
 
+def _cancel_job(job_id: str) -> None:
+    """Silently cancel a scheduled job if it exists."""
+    try:
+        scheduler.remove_job(job_id)
+        print(f"[Scheduler] Cancelled job {job_id}")
+    except Exception:
+        pass  # Job didn't exist — that's fine
+
+
+async def notify_advisor_no_reply(contact_id: str, contact_name: str, product: str, assigned_uid: str) -> None:
+    """Notify advisor when client hasn't replied to bot message within 5 minutes."""
+    ghl_link = f"https://app.gohighlevel.com/contacts/{contact_id}"
+    product_str = f" | Seguro: {product}" if product else ""
+    msg = (
+        f"⏰ Sin respuesta: {contact_name}{product_str} no ha respondido el mensaje del bot "
+        f"en los ultimos 5 min. Considera hacer seguimiento manual: {ghl_link}"
+    )
+    advisor_contact_id = AGENTS_CONTACTS.get(assigned_uid, "")
+    if advisor_contact_id:
+        await send_sms(advisor_contact_id, msg)
+    await send_sms(BARBARA_CONTACT_ID, msg)
+    print(f"[Scheduler] No-reply notification sent for {contact_name}")
+
+
 async def process_inbound_message(contact_id: str, message: str, channel: str, contact_name: str, assigned_user_id: str = ""):
     """Process incoming message from a lead"""
     print(f"[Webhook] Inbound {channel} from {contact_name} ({contact_id}): {message[:50]}...")
@@ -150,6 +174,19 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
 
     # Activity stamp so advisors can distinguish bot messages from human ones in GHL
     await add_bot_stamp(contact_id)
+
+    # Schedule advisor notification if client doesn't reply in 5 minutes
+    assigned_uid_for_notify = assigned_user_id or await get_opportunity_assigned_user(contact_id)
+    notify_at = datetime.now(ET) + timedelta(minutes=5)
+    scheduler.add_job(
+        notify_advisor_no_reply,
+        "date",
+        run_date=notify_at,
+        id=f"no_reply_{contact_id}",
+        replace_existing=True,
+        args=[contact_id, contact_name, product, assigned_uid_for_notify],
+    )
+    print(f"[Scheduler] No-reply notification set for {contact_name} at {notify_at.strftime('%I:%M %p ET')}")
 
     intent = ai_result.get("intent", "")
 
@@ -409,13 +446,23 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
                     print(f"[Webhook] Fetched message: {message_body[:80]}")
 
             if message_body:
-                print(f"[Webhook] Processing {channel} from {contact_name or contact_id}: {message_body[:80]}")
                 user_obj = payload.get("user", {})
                 assigned_uid = user_obj.get("id", "") if isinstance(user_obj, dict) else ""
-                background_tasks.add_task(
+
+                # Cancel any pending "no reply" advisor notification — client just wrote
+                _cancel_job(f"no_reply_{contact_id}")
+
+                # Schedule bot response with 5-min delay (reset timer if client sends more messages)
+                run_at = datetime.now(ET) + timedelta(minutes=5)
+                scheduler.add_job(
                     process_inbound_message,
-                    contact_id, message_body, channel, contact_name, assigned_uid
+                    "date",
+                    run_date=run_at,
+                    id=f"bot_reply_{contact_id}",
+                    replace_existing=True,
+                    args=[contact_id, message_body, channel, contact_name, assigned_uid],
                 )
+                print(f"[Webhook] Response scheduled in 5 min for {contact_name or contact_id} at {run_at.strftime('%I:%M %p ET')}")
             else:
                 print(f"[Webhook] No message found for {contact_id} — skipping")
 

@@ -303,10 +303,18 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     if is_english:
         system_prompt += "\n\nIMPORTANT: The client is writing in English. Respond in English."
 
+    # Push to close fast — after 3+ exchanges, stop collecting info and transfer
+    if len(history) >= 3:
+        system_prompt += (
+            "\n\nATENCION — CIERRA YA: Ya tuviste suficientes intercambios con este lead. "
+            "NO sigas haciendo preguntas. Ve DIRECTO al PASO 3: pregunta si prefiere llamada ahora o cita. "
+            "Maximo 1 oracion. El asesor humano se encargara del resto."
+        )
+
     try:
         response = get_client().messages.create(
             model="claude-sonnet-4-5",  # Current model (June 2026)
-            max_tokens=300,
+            max_tokens=200,  # Reduced to keep responses short
             system=system_prompt,
             messages=messages
         )
