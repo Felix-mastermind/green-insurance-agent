@@ -159,6 +159,18 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     # "quiero una cita" removed — handled by wants_appt_kw / wants_appointment intent
     should_transfer = any(kw in user_message.lower() for kw in transfer_keywords)
 
+    # Context check: if client says "sí/yes/ok" and last bot message asked about an advisor
+    if not should_transfer and history:
+        affirmatives = {"sí", "si", "yes", "ok", "claro", "dale", "está bien", "esta bien",
+                        "adelante", "perfecto", "por favor", "please", "sure", "yep", "yeah"}
+        msg_clean = user_message.strip().lower().rstrip("!.¡")
+        if msg_clean in affirmatives or len(msg_clean) <= 4:
+            last_bot = next((m["content"] for m in reversed(history) if m["role"] == "assistant"), "")
+            advisor_question_kw = ["asesor", "agente", "llamar", "llamarte", "contactar",
+                                   "comunic", "hablar", "te llame", "te contacte"]
+            if any(kw in last_bot.lower() for kw in advisor_question_kw):
+                should_transfer = True
+
     # Detect wrong_number and not_interested before calling AI
     msg_lower = user_message.lower()
     wrong_number_keywords = [
