@@ -156,6 +156,10 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
     """Process incoming message from a lead"""
     print(f"[Webhook] Inbound {channel} from {contact_name} ({contact_id}): {message[:50]}...")
 
+    # Re-check: if advisor responded within the last 15 min while we were waiting, stay silent
+    if await human_agent_active(contact_id, takeover_minutes=15):
+        print(f"[Webhook] SKIPPED (delayed check) — advisor responded in last 15 min for {contact_name}")
+        return
 
     # If contact has a pending survey, handle the 1-5 response before AI
     msg_stripped = message.strip()
@@ -437,10 +441,10 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
                 print(f"[Webhook] SKIPPED — bot pausado para {contact_name} ({contact_id})")
                 return {"status": "ok", "event": "skipped_bot_pausado"}
 
-            # STOP bot if a human agent has already responded in this conversation
-            if await human_agent_active(contact_id):
-                print(f"[Webhook] SKIPPED — human agent is active for {contact_name} ({contact_id})")
-                return {"status": "ok", "event": "skipped_human_active"}
+            # If a human advisor responded in the last 15 min, give them space.
+            # Still schedule the bot as a 15-min fallback — if advisor goes silent,
+            # process_inbound_message re-checks and responds only if no recent human reply.
+            advisor_active = await human_agent_active(contact_id, takeover_minutes=15)
 
             # STOP bot if lead is still in "New Lead" stage —
             # let GHL automation run + advisor calls 3 times first.
@@ -474,8 +478,9 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
                 # Cancel any pending "no reply" advisor notification — client just wrote
                 _cancel_job(f"no_reply_{contact_id}")
 
-                # Schedule bot response with 5-min delay (reset timer if client sends more messages)
-                run_at = datetime.now(ET) + timedelta(minutes=5)
+                # Delay: 15 min if advisor is active (give them space), 5 min otherwise
+                delay_minutes = 15 if advisor_active else 5
+                run_at = datetime.now(ET) + timedelta(minutes=delay_minutes)
                 scheduler.add_job(
                     process_inbound_message,
                     "date",
@@ -484,7 +489,10 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
                     replace_existing=True,
                     args=[contact_id, message_body, channel, contact_name, assigned_uid],
                 )
-                print(f"[Webhook] Response scheduled in 5 min for {contact_name or contact_id} at {run_at.strftime('%I:%M %p ET')}")
+                if advisor_active:
+                    print(f"[Webhook] Advisor active — bot on 15-min standby for {contact_name} at {run_at.strftime('%I:%M %p ET')}")
+                else:
+                    print(f"[Webhook] Response scheduled in 5 min for {contact_name or contact_id} at {run_at.strftime('%I:%M %p ET')}")
             else:
                 print(f"[Webhook] No message found for {contact_id} — skipping")
 
