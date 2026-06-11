@@ -218,7 +218,9 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
         await notify_advisor_call_requested(contact_id, contact_name, assigned_uid, product)
         await move_to_hot_lead(contact_id)
-        print(f"[Webhook] {contact_name} wants call — HOT Lead + advisor notified")
+        await add_contact_tag(contact_id, "bot-pausado")
+        _cancel_job(f"bot_reply_{contact_id}")
+        print(f"[Webhook] {contact_name} wants call — HOT Lead + advisor notified + bot pausado")
 
     elif intent == "wants_appointment":
         # Only create appointment when client has given a specific day or time.
@@ -328,11 +330,15 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
                 await send_whatsapp(contact_id, transfer_msg)
             moved = await move_to_hot_lead(contact_id)
             await add_contact_tag(contact_id, "necesita-asesor")
-            print(f"[Webhook] Transfer (in hours) for {contact_name} — HOT Lead: {moved}")
+            await add_contact_tag(contact_id, "bot-pausado")
+            _cancel_job(f"bot_reply_{contact_id}")
+            print(f"[Webhook] Transfer (in hours) for {contact_name} — HOT Lead: {moved} + bot pausado")
         else:
             moved = await move_to_hot_lead(contact_id)
             await add_contact_tag(contact_id, "llamar-manana")
-            print(f"[Webhook] Transfer (out of hours) for {contact_name} — waiting for preferred time")
+            await add_contact_tag(contact_id, "bot-pausado")
+            _cancel_job(f"bot_reply_{contact_id}")
+            print(f"[Webhook] Transfer (out of hours) for {contact_name} — HOT Lead + bot pausado")
 
 def extract_message_body(payload: dict) -> str:
     """Extract message text from various GHL payload formats"""
@@ -432,6 +438,16 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
         # If no type, treat as inbound if it has a message body
         message_body = extract_message_body(payload)
         contact_id = extract_contact_id(payload)
+
+        # Outbound message from a human advisor → cancel pending bot reply immediately
+        from app.ghl_client import BOT_USER_ID
+        is_outbound = payload.get("direction", "").lower() == "outbound"
+        if is_outbound and contact_id:
+            sender_uid = (payload.get("userId", "") or
+                          (payload.get("user", {}) or {}).get("id", ""))
+            if sender_uid and sender_uid != BOT_USER_ID:
+                _cancel_job(f"bot_reply_{contact_id}")
+                print(f"[Webhook] Advisor {sender_uid} sent message — bot_reply job cancelled for {contact_id}")
 
         if is_inbound and contact_id:
             contact_name = extract_contact_name(payload)
