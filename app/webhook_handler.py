@@ -157,8 +157,11 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
     print(f"[Webhook] Inbound {channel} from {contact_name} ({contact_id}): {message[:50]}...")
 
     # Re-check: if advisor responded within the last 15 min while we were waiting, stay silent
+    # Also add bot-pausado so future messages skip this check entirely
     if await human_agent_active(contact_id, takeover_minutes=15):
-        print(f"[Webhook] SKIPPED (delayed check) — advisor responded in last 15 min for {contact_name}")
+        await add_contact_tag(contact_id, "bot-pausado")
+        _cancel_job(f"bot_reply_{contact_id}")
+        print(f"[Webhook] SKIPPED — advisor active, bot-pausado added for {contact_name}")
         return
 
     # If contact has a pending survey, handle the 1-5 response before AI
@@ -457,10 +460,14 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
                 print(f"[Webhook] SKIPPED — bot pausado para {contact_name} ({contact_id})")
                 return {"status": "ok", "event": "skipped_bot_pausado"}
 
-            # If a human advisor responded in the last 15 min, give them space.
-            # Still schedule the bot as a 15-min fallback — if advisor goes silent,
-            # process_inbound_message re-checks and responds only if no recent human reply.
+            # If a human advisor responded in the last 15 min, pause bot permanently
+            # and skip — advisor is handling this lead.
             advisor_active = await human_agent_active(contact_id, takeover_minutes=15)
+            if advisor_active:
+                await add_contact_tag(contact_id, "bot-pausado")
+                _cancel_job(f"bot_reply_{contact_id}")
+                print(f"[Webhook] SKIPPED — advisor active, bot-pausado added for {contact_name}")
+                return {"status": "ok", "event": "skipped_advisor_active"}
 
             # STOP bot if lead is still in "New Lead" stage —
             # let GHL automation run + advisor calls 3 times first.
