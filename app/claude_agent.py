@@ -196,6 +196,11 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         # Inglés
         "not interested", "no thank you", "don't need", "dont need",
         "not right now", "maybe later", "no thanks",
+        # "No me molesten" y variantes directas de parar contacto
+        "no molesten", "ya no molesten", "no me molesten", "dejen de escribir",
+        "dejen de mandar", "no me escriban", "no me manden", "paren de escribir",
+        "ya no quiero", "borrenme", "quitenme", "no quiero que me llamen",
+        "no quiero mensajes", "no contacten", "no me contacten",
         # Opt-out / SMS unsubscribe keywords (GHL enables DND automatically on these)
         "stop", "unsubscribe", "cancel", "opt out", "optout",
         "remove me", "no more messages", "stop messages", "do not contact",

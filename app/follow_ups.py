@@ -387,6 +387,15 @@ async def run_follow_ups(force: bool = False):
         if any(stage_name.lower() == s.lower() for s in SKIP_STAGES):
             continue
 
+        # Skip contacts that have bot-pausado tag (advisor active or client opted out)
+        contact_id_quick = opp.get("contactId", "")
+        if contact_id_quick:
+            _contact_quick = await get_contact(contact_id_quick)
+            if _contact_quick and has_tag(_contact_quick, "bot-pausado"):
+                skipped += 1
+                print(f"[FollowUp] SKIP bot-pausado: {_contact_quick.get('firstName','?')} ({contact_id_quick})")
+                continue
+
         # Cross-sell
         if stage_name in CROSS_SELL_STAGES:
             contact_id = opp.get("contactId", "")
