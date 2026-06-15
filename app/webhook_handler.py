@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
 from app.scheduler import scheduler, ET
 from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, create_opportunity, CROSS_SELL_PIPELINES, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities, is_bot_paused, add_bot_stamp, notify_mastermind_staff, get_notification_recipients, PIPELINE_AUTO_MASTERMIND
-from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered
+from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered, log_survey_sent
 
 router = APIRouter()
 
@@ -24,8 +24,8 @@ BARBARA_CONTACT_ID = "Fr2WbOMJcsnKPC01S0Dz"
 REVIEW_LINK = "https://share.google/07auFx6a4aT7D7ht6"
 
 BUSINESS_HOURS_START = 11  # 11:00 AM ET
-BUSINESS_HOURS_END   = 19  # 7:00 PM ET
-BUSINESS_DAYS        = {0, 1, 2, 3, 4}  # Lunes a Viernes
+BUSINESS_HOURS_END   = 20  # 8:00 PM ET
+BUSINESS_DAYS        = {0, 1, 2, 3, 4, 5}  # Lunes a Sabado
 
 
 def is_business_hours() -> bool:
@@ -40,8 +40,9 @@ def next_business_opening() -> datetime:
     candidate = now.replace(hour=BUSINESS_HOURS_START, minute=0, second=0, microsecond=0)
     if now >= candidate:
         candidate += timedelta(days=1)
-    while candidate.weekday() not in BUSINESS_DAYS:
+    while candidate.weekday() not in BUSINESS_DAYS or candidate.hour >= BUSINESS_HOURS_END:
         candidate += timedelta(days=1)
+        candidate = candidate.replace(hour=BUSINESS_HOURS_START, minute=0, second=0, microsecond=0)
     return candidate
 
 
@@ -88,6 +89,68 @@ async def is_new_lead_stage(contact_id: str) -> bool:
         if "new lead" in stage_name.lower():
             return True
     return False
+
+
+_CLOSED_STAGES = {
+    "not eligible", "not interested", "not insterested", "dnd",
+    "wrong number", "offer not accepted", "reject", "won",
+}
+
+async def is_opportunity_closed(contact_id: str) -> bool:
+    """
+    Returns True if the contact's opportunity is marked lost/won or is in a terminal stage.
+    Used to prevent bot from replying after an advisor has closed/rejected a lead.
+    """
+    opportunities = await get_contact_opportunities(contact_id)
+    for opp in opportunities:
+        status = (opp.get("status") or "").lower()
+        if status in ("lost", "won"):
+            return True
+        pipeline_stage = opp.get("pipelineStage") or {}
+        stage_name = (
+            pipeline_stage.get("name", "")
+            if isinstance(pipeline_stage, dict)
+            else str(pipeline_stage)
+        )
+        if not stage_name:
+            stage_name = opp.get("stageName", "") or ""
+        if stage_name.lower() in _CLOSED_STAGES:
+            return True
+    return False
+
+
+async def _send_won_survey(contact_id: str, contact_name: str):
+    """Send review survey when an opportunity is marked as Won. Logs as pending so the bot can handle the response."""
+    already_pending = await check_survey_pending(contact_id)
+    if already_pending:
+        print(f"[Survey] Survey already pending for {contact_name} ({contact_id}) — skipping")
+        return
+    contact_data = await get_contact(contact_id)
+    if not contact_data:
+        return
+    first_name = contact_data.get("firstName", "") or contact_name or "cliente"
+    lang = "en" if "english" in [str(t).lower() for t in (contact_data.get("tags") or [])] else "es"
+    if lang == "en":
+        msg = (
+            f"Hi {first_name}! Thank you for choosing Green Insurance 💚 "
+            f"How would you rate our service?\n\n"
+            f"Reply with a number:\n"
+            f"1️⃣ Poor\n2️⃣ Fair\n3️⃣ Good\n4️⃣ Very good\n5️⃣ Excellent"
+        )
+    else:
+        msg = (
+            f"Hola {first_name}! Gracias por elegir Green Insurance 💚 "
+            f"¿Cómo te pareció nuestro servicio?\n\n"
+            f"Responde con un número:\n"
+            f"1️⃣ Malo\n2️⃣ Regular\n3️⃣ Bueno\n4️⃣ Muy bueno\n5️⃣ Excelente"
+        )
+    channel = await get_contact_channel(contact_id)
+    if channel == "SMS":
+        await send_sms(contact_id, msg)
+    else:
+        await send_whatsapp(contact_id, msg)
+    await log_survey_sent(contact_id, first_name)
+    print(f"[Survey] Won survey sent to {first_name} ({contact_id})")
 
 
 async def handle_survey_response(contact_id: str, contact_name: str, score: int, channel: str):
@@ -156,6 +219,11 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
     """Process incoming message from a lead"""
     print(f"[Webhook] Inbound {channel} from {contact_name} ({contact_id}): {message[:50]}...")
 
+    # Re-check bot-pausado — tag may have been added while job was queued
+    if await is_bot_paused(contact_id):
+        print(f"[Webhook] SKIPPED — bot pausado (re-check) para {contact_name} ({contact_id})")
+        return
+
     # Re-check: if advisor responded within the last 15 min while we were waiting, stay silent
     # Also add bot-pausado so future messages skip this check entirely
     if await human_agent_active(contact_id, takeover_minutes=15):
@@ -164,10 +232,28 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         print(f"[Webhook] SKIPPED — advisor active, bot-pausado added for {contact_name}")
         return
 
-    # If contact has a pending survey, handle the 1-5 response before AI
+    # Survey responses take priority — won contacts can still reply to the review survey
     msg_stripped = message.strip()
-    if msg_stripped in ("1", "2", "3", "4", "5") and await check_survey_pending(contact_id):
-        await handle_survey_response(contact_id, contact_name, int(msg_stripped), channel)
+    _SURVEY_TEXT_MAP = {
+        "malo": 1, "bad": 1, "poor": 1,
+        "regular": 2, "fair": 2,
+        "bueno": 3, "bien": 3, "good": 3,
+        "muy bueno": 4, "very good": 4, "muy bien": 4,
+        "excelente": 5, "excellent": 5, "perfecto": 5, "5 estrellas": 5,
+    }
+    _survey_score = None
+    if msg_stripped in ("1", "2", "3", "4", "5"):
+        _survey_score = int(msg_stripped)
+    else:
+        _survey_score = _SURVEY_TEXT_MAP.get(msg_stripped.lower())
+    if _survey_score and await check_survey_pending(contact_id):
+        await handle_survey_response(contact_id, contact_name, _survey_score, channel)
+        return
+
+    # Re-check: if the opportunity was closed/lost/won while we were waiting, stay silent
+    if await is_opportunity_closed(contact_id):
+        await add_contact_tag(contact_id, "bot-pausado")
+        print(f"[Webhook] SKIPPED — opportunity closed/lost, bot-pausado added for {contact_name}")
         return
 
     # Handle SMS opt-out keywords — GHL enables DND automatically, we just move the stage
@@ -528,7 +614,21 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
         elif event_type in ("OpportunityStageUpdate", "opportunity_stage_update"):
             stage = payload.get("stage", {})
             stage_name = stage.get("name", "") if isinstance(stage, dict) else str(stage)
-            print(f"[Webhook] Stage updated for {contact_id}: {stage_name}")
+            status = (payload.get("status") or "").lower()
+            print(f"[Webhook] Stage updated for {contact_id}: {stage_name} | status: {status}")
+            if (stage_name.lower() == "won" or status == "won") and contact_id:
+                await _send_won_survey(contact_id, contact_name)
+
+        # Opportunity marked as Won → send review survey
+        elif event_type in ("OpportunityStatusUpdate", "opportunity_status_update"):
+            status = (payload.get("status") or "").lower()
+            opp_data = payload.get("opportunity") or {}
+            if not status:
+                status = (opp_data.get("status") or "").lower()
+            if not contact_id:
+                contact_id = opp_data.get("contactId", "")
+            if status == "won" and contact_id:
+                await _send_won_survey(contact_id, contact_name)
 
         return {"status": "ok", "event": event_type or "inbound_message"}
 
