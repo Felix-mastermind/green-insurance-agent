@@ -80,12 +80,12 @@ MESSAGES = {
         "Reactivation - 60+ Days": {
             "es": "Hola {name}! Han pasado unos meses desde tu consulta sobre seguro dental. Tenemos nuevos planes disponibles. Te interesa una cotizacion actualizada?",
             "en": "Hi {name}! It has been a while since you asked about dental insurance. We have new plans available. Interested in an updated quote?",
-            "days": 2,
+            "days": 30,
         },
         "Follow Up to Close": {
-            "es": "Hola {name}! Pudiste revisar las opciones de seguro dental? Podemos activar tu poliza esta semana. Te llamo hoy?",
-            "en": "Hi {name}! Were you able to review the dental insurance options? We can get your policy started this week. Shall I call you today?",
-            "days": 2,
+            "es": "Hola {name}! Queria saber que penso de la propuesta de seguro dental que le presentamos. Tuvo oportunidad de revisarla? Con gusto le resuelvo cualquier duda.",
+            "en": "Hi {name}! I wanted to check in and see what you thought of the dental insurance offer we presented. Were you able to review it? Happy to answer any questions.",
+            "days": 3,
         },
         "Missed Appointment": {
             "es": "Hola {name}! Vimos que no pudiste asistir a tu cita. No hay problema, cuando te queda bien reagendar para tu seguro dental?",
@@ -128,12 +128,12 @@ MESSAGES = {
         "Reactivation - 60+ Days": {
             "es": "Hola {name}! Han pasado unos meses desde tu consulta sobre seguro de auto. Tenemos nuevas opciones disponibles. Te interesa una cotizacion actualizada?",
             "en": "Hi {name}! It has been a while since you asked about auto insurance. We have new options available. Interested in an updated quote?",
-            "days": 2,
+            "days": 30,
         },
         "Follow Up to Close": {
-            "es": "Hola {name}! Ya decidiste sobre tu seguro de auto? Podemos activar tu cobertura hoy mismo. Te llamamos?",
-            "en": "Hi {name}! Have you decided on your auto insurance? We can get you covered today. Should we call?",
-            "days": 2,
+            "es": "Hola {name}! Queria saber que penso de la cotizacion de seguro de auto que le preparamos. Pudo revisarla? Cualquier pregunta con gusto se la aclaro.",
+            "en": "Hi {name}! I wanted to check what you thought of the auto insurance quote we put together for you. Were you able to look it over? Happy to answer any questions.",
+            "days": 3,
         },
         "Missed Appointment": {
             "es": "Hola {name}! No pudiste asistir a tu cita para el seguro de auto. Cuando te queda bien reagendar?",
@@ -216,9 +216,9 @@ MESSAGES = {
             "days": 2,
         },
         "Follow Up to Close": {
-            "es": "Hola {name}! Pudiste pensar en las opciones de seguro de vida? Podemos activar tu poliza esta semana. Hablamos hoy?",
-            "en": "Hi {name}! Were you able to think about the life insurance options? We can get your policy started this week. Shall we talk today?",
-            "days": 2,
+            "es": "Hola {name}! Queria saber que penso de la oferta de seguro de vida que le presentamos. Pudo revisarla con calma? Cualquier pregunta sobre la cobertura o los beneficios, con gusto la respondo.",
+            "en": "Hi {name}! I wanted to check in and see what you thought of the life insurance offer we presented. Were you able to review it? Happy to answer any questions about the coverage or benefits.",
+            "days": 3,
         },
         "Missed Appointment": {
             "es": "Hola {name}! No pudiste asistir a tu cita para el seguro de vida. Cuando podemos reagendar?",
@@ -525,7 +525,9 @@ async def run_follow_ups(force: bool = False):
                 skipped += 1
                 continue
 
-            already_sent = await check_reminder_sent(contact_id, f"followup_{product}_{stage_name[:15]}", today.strftime("%Y-%m-%d"))
+            # 60+ day leads: check monthly so they only get one message per month
+            _log_granularity = today.strftime("%Y-%m") if "60+" in stage_name else today.strftime("%Y-%m-%d")
+            already_sent = await check_reminder_sent(contact_id, f"followup_{product}_{stage_name[:15]}", _log_granularity)
             if already_sent:
                 skipped += 1
                 continue
@@ -545,7 +547,7 @@ async def run_follow_ups(force: bool = False):
                 continue
             message = template.format(name=first_name) if template else ""
             followup_key_to_log = f"followup_{product}_{stage_name[:15]}"
-            log_period = today.strftime("%Y-%m-%d")
+            log_period = _log_granularity
         # Use AI to generate contextual message — reads full conversation so it never repeats
         is_stage_dynamic = stage_config.get("dynamic", False)
         conv_history = await get_conversation_history(contact_id, limit=10)
