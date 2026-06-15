@@ -356,6 +356,11 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
                     )
                     print(f"[Webhook] {contact_name} appointment booked (out of hours) — reminder at {reminder_time.strftime('%Y-%m-%d %I:%M %p ET')}")
 
+                # Appointment confirmed — bot stops here
+                await add_contact_tag(contact_id, "bot-pausado")
+                _cancel_job(f"bot_reply_{contact_id}")
+                print(f"[Webhook] {contact_name} — bot-pausado added after appointment booking")
+
     elif intent == "wrong_number":
         await move_to_wrong_number(contact_id)
         contact_data = await get_contact(contact_id)

@@ -820,6 +820,8 @@ NANCY_USER_ID    = "crgvDrxKXD1o7ceciD6u"  # Nancy Martinez staff user ID
 NANCY_PHONE      = "+17708424199"            # Nancy Martinez staff phone number
 
 # Cache: resolved at runtime via search_contacts to avoid hardcoding a client's contact ID
+# Known BAD ID (client Nancy Martinez with bot-pausado) — never use this as staff contact
+_NANCY_BAD_CONTACT_ID = "u9ae0YaGV2DVQrLfU85G"  # client shown in screenshot, gets spammed otherwise
 _nancy_contact_id_cache: str = ""
 
 async def get_nancy_contact_id() -> str:
@@ -827,15 +829,24 @@ async def get_nancy_contact_id() -> str:
     global _nancy_contact_id_cache
     if _nancy_contact_id_cache:
         return _nancy_contact_id_cache
+    import re as _re
+    target_digits = _re.sub(r'\D', '', NANCY_PHONE)  # "17708424199"
     try:
         results = await search_contacts(NANCY_PHONE)
         for c in results:
-            if c.get("phone", "").replace(" ", "").replace("-", "") in NANCY_PHONE.replace("-", ""):
-                _nancy_contact_id_cache = c["id"]
-                logger.info("[GHL] Resolved Nancy contact ID: %s", _nancy_contact_id_cache)
+            contact_digits = _re.sub(r'\D', '', c.get("phone", "") or "")
+            # Must be a non-empty exact match (last 10 digits) to avoid matching empty phones or partial numbers
+            if contact_digits and (contact_digits == target_digits or contact_digits == target_digits[-10:]):
+                cid = c["id"]
+                if cid == _NANCY_BAD_CONTACT_ID:
+                    logger.warning("[GHL] Skipping known client contact for Nancy — bad ID %s", cid)
+                    continue
+                _nancy_contact_id_cache = cid
+                logger.info("[GHL] Resolved Nancy staff contact ID: %s", _nancy_contact_id_cache)
                 return _nancy_contact_id_cache
     except Exception as e:
         logger.warning("[GHL] Could not resolve Nancy contact ID: %s", e)
+    logger.warning("[GHL] Nancy staff contact NOT found by phone %s — skipping SMS to Nancy", NANCY_PHONE)
     return ""
 
 AGENTS_CONTACTS = {
@@ -846,22 +857,40 @@ AGENTS_CONTACTS = {
     "axXwrCLjvTuDMBSiMoPa": "WGiwNgCRyB2dlUC7ipjj",   # Sharon Jones
 }
 
+async def _contact_is_paused(cid: str) -> bool:
+    """Returns True if the contact has bot-pausado tag — used to guard outbound notification SMS."""
+    try:
+        data = await get_contact(cid)
+        tags = data.get("tags", []) if data else []
+        if isinstance(tags, str):
+            tags = [t.strip().lower() for t in tags.split(",")]
+        return "bot-pausado" in [str(t).lower() for t in tags]
+    except Exception:
+        return False
+
+
 async def notify_mastermind_staff(contact_id: str, msg: str, assigned_uid: str) -> None:
     """For Auto Mastermind leads: SMS to assigned advisor + SMS to Nancy Martinez (staff).
     Nancy is looked up by her staff phone number to avoid sending to a same-name client.
+    Skips any contact that has bot-pausado tag (prevents spamming client contacts by mistake).
     """
     # SMS to assigned advisor
     advisor_cid = AGENTS_CONTACTS.get(assigned_uid, "")
     if advisor_cid and advisor_cid != BARBARA_CONTACT_ID:
-        await send_sms(advisor_cid, msg)
+        if not await _contact_is_paused(advisor_cid):
+            await send_sms(advisor_cid, msg)
+        else:
+            logger.warning("[GHL] Advisor contact %s has bot-pausado — skipping notification SMS", advisor_cid)
 
     # SMS to Nancy using her staff phone lookup
     nancy_cid = await get_nancy_contact_id()
-    if nancy_cid and nancy_cid != advisor_cid:
-        await send_sms(nancy_cid, msg)
+    if nancy_cid and nancy_cid != advisor_cid and nancy_cid != _NANCY_BAD_CONTACT_ID:
+        if not await _contact_is_paused(nancy_cid):
+            await send_sms(nancy_cid, msg)
+        else:
+            logger.warning("[GHL] Nancy contact %s has bot-pausado — skipping notification SMS", nancy_cid)
     elif not nancy_cid:
-        # Fallback to Barbara if Nancy's contact can't be resolved
-        await send_sms(BARBARA_CONTACT_ID, msg)
+        logger.warning("[GHL] Nancy contact unresolved — skipping Nancy SMS (no fallback to avoid wrong contact)")
 
 async def get_notification_recipients(contact_id: str, assigned_uid: str) -> str:
     """Return pipeline_id for the contact's first opportunity (used for routing decisions)."""
@@ -877,6 +906,12 @@ AGENTS_CALENDARS = {
     "RGSzf4hQ3OvSTYPcVaYT": "91JNjAkaA3SB1h8U5Dmu",   # Allison Herrera
     "XIWNWHYdv3OzZ7EsHbCu": "M3pvKiMzqOxWak2yFEcw",   # Barbara Quintero
     "6ElAdSHFu1hi0qopsDco": "NpNlS30qYFOWMUTUlMzE",   # Fatima Lopez
+    "dZA4qrSpBr6wfzbxIoiS": "HfwSOWV8o29FF8FOC44v",   # Valeria Rosales
+    "tfRu7T8gu8ScMJudoStc": "PkUzxTYDUKL169XrN17k",   # Sherlyn Cruz
+    "eLJxPkyUKmGQxdGsBFsn": "UY1N9iPnGW1tjZThvAcp",   # Maria Mora
+    "crgvDrxKXD1o7ceciD6u": "Up2PlYWTbjE3IlQwzvn4",   # Nancy Martinez
+    "c5fbWxHUYjMiUeZi5ppN": "uuLLPTElTADN2XnKTGu5",   # Patricia Romero
+    "WQZEuo0ZqKn4M7mPzkHV": "xN0M3tkwWrVH8N6TOqdd",   # Lizeth Hernandez
 }
 DEFAULT_CALENDAR_ID = "PydmDhNqVvTlKlaDTNtv"
 
@@ -940,8 +975,8 @@ async def create_appointment(contact_id: str, contact_name: str, assigned_user_i
     now = datetime.now(ET)
     # Simple: book 24h from now at 2pm ET
     appt_time = now.replace(hour=14, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    if appt_time.weekday() >= 5:  # weekend → move to Monday
-        appt_time += timedelta(days=(7 - appt_time.weekday()))
+    if appt_time.weekday() == 6:  # Sunday only → move to Monday
+        appt_time += timedelta(days=1)
 
     start_time = appt_time.isoformat()
     end_time = (appt_time + timedelta(hours=1)).isoformat()
