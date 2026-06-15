@@ -481,13 +481,12 @@ async def run_follow_ups(force: bool = False):
         messages_list = stage_config.get("messages")
 
         if messages_list:
-            # Rotating messages: msg1 eligible after required_days, msg2 after 2x, etc.
-            max_attempt = (days_in_stage // required_days) - 1
-            if not force and max_attempt < 0:
+            # Single message per stage — only ever send the first message
+            if not force and days_in_stage < required_days:
                 skipped += 1
                 continue
 
-            max_attempt = min(max_attempt, len(messages_list) - 1)
+            max_attempt = 0  # only first message
 
             try:
                 contact_data = await get_contact(contact_id)
@@ -507,19 +506,14 @@ async def run_follow_ups(force: bool = False):
             first_name = contact_data.get("firstName", "") or contact_data.get("first_name", "Hola")
             year_str = today.strftime("%Y")
 
-            template_dict = None
-            chosen_attempt = None
-            for idx in range(0, max_attempt + 1):
-                attempt_key = f"followup_{product}_{stage_name[:12]}_m{idx + 1}"
-                already_sent = await check_reminder_sent(contact_id, attempt_key, year_str)
-                if not already_sent:
-                    template_dict = messages_list[idx]
-                    chosen_attempt = idx
-                    break
-
-            if template_dict is None:
+            attempt_key = f"followup_{product}_{stage_name[:12]}_m1"
+            already_sent = await check_reminder_sent(contact_id, attempt_key, year_str)
+            if already_sent:
                 skipped += 1
                 continue
+
+            template_dict = messages_list[0]
+            chosen_attempt = 0
 
             template = template_dict.get(lang, template_dict.get("es", ""))
             if not template:
