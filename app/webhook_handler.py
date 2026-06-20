@@ -309,13 +309,22 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         print(f"[Webhook] SKIPPED — opportunity closed/lost, bot-pausado added for {contact_name}")
         return
 
-    # Handle SMS opt-out keywords — GHL enables DND automatically, we just move the stage
-    _optout_words = {"stop", "unsubscribe", "cancel", "optout", "opt out",
+    # Handle opt-out — English exact match + Spanish substring detection
+    _msg_lc = msg_stripped.lower().strip()
+    _optout_exact = {"stop", "unsubscribe", "cancel", "optout", "opt out",
                      "remove me", "stop messages", "do not contact"}
-    if msg_stripped.lower().strip() in _optout_words or msg_stripped.lower().strip() == "stop":
+    _optout_contains = [
+        "no molesten", "no me molest", "no me contact", "dejen de",
+        "no quiero mensajes", "no me manden", "borrenme", "bórrenme",
+        "ya no me escriban", "no me escriban", "no me llamen",
+        "stop contacting", "do not contact", "remove me",
+    ]
+    _is_optout = _msg_lc in _optout_exact or any(kw in _msg_lc for kw in _optout_contains)
+    if _is_optout:
         await move_to_not_interested(contact_id)
-        print(f"[Webhook] OPT-OUT '{msg_stripped}' from {contact_name} — moved to Not Interested (DND handled by GHL)")
-        return  # No reply — GHL DND already blocks outbound
+        await add_contact_tag(contact_id, "bot-pausado")
+        print(f"[Webhook] OPT-OUT '{msg_stripped}' from {contact_name} — moved to Not Interested + bot-pausado")
+        return  # No reply
 
     # Pre-fetch pipeline so AI can give product-specific responses (e.g. already_insured)
     _, product = await get_contact_pipeline(contact_id)
