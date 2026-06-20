@@ -28,10 +28,19 @@ BUSINESS_HOURS_END   = 20  # 8:00 PM ET
 BUSINESS_DAYS        = {0, 1, 2, 3, 4, 5}  # Lunes a Sabado
 
 
+SILENT_HOURS_START = 21  # 9:00 PM ET — bot stops responding
+SILENT_HOURS_END   = 9   # 9:00 AM ET — bot resumes
+
 def is_business_hours() -> bool:
-    """Retorna True si es L-V 11am-7pm ET."""
+    """Retorna True si es L-S 11am-8pm ET."""
     now = datetime.now(ET)
     return now.weekday() in BUSINESS_DAYS and BUSINESS_HOURS_START <= now.hour < BUSINESS_HOURS_END
+
+
+def is_silent_hours() -> bool:
+    """Retorna True entre 9pm y 9am ET — bot no responde para no molestar."""
+    now = datetime.now(ET)
+    return now.hour >= SILENT_HOURS_START or now.hour < SILENT_HOURS_END
 
 
 def next_business_opening() -> datetime:
@@ -44,6 +53,26 @@ def next_business_opening() -> datetime:
         candidate += timedelta(days=1)
         candidate = candidate.replace(hour=BUSINESS_HOURS_START, minute=0, second=0, microsecond=0)
     return candidate
+
+
+def next_opening_label(lang: str = "es") -> str:
+    """Returns a human-readable label for when advisors are next available — 'hoy a las 11am' or 'mañana a las 11am' or 'el lunes a las 11am'."""
+    now = datetime.now(ET)
+    opening = next_business_opening()
+    days_es = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
+    days_en = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    hour_str = opening.strftime("%-I:%M %p").replace("AM", "am").replace("PM", "pm") if hasattr(opening, 'strftime') else "11am"
+    try:
+        hour_str = f"{opening.hour % 12 or 12}am" if opening.hour < 12 else f"{opening.hour % 12 or 12}pm"
+    except Exception:
+        hour_str = "11am"
+    if opening.date() == now.date():
+        return f"hoy a las {hour_str}" if lang == "es" else f"today at {hour_str}"
+    elif (opening.date() - now.date()).days == 1:
+        return f"manana a las {hour_str}" if lang == "es" else f"tomorrow at {hour_str}"
+    else:
+        day_name = days_es[opening.weekday()] if lang == "es" else days_en[opening.weekday()]
+        return f"el {day_name} a las {hour_str}" if lang == "es" else f"on {day_name} at {hour_str}"
 
 
 async def send_advisor_next_day_reminder(contact_id: str, advisor_uid: str,
@@ -224,6 +253,30 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         print(f"[Webhook] SKIPPED — bot pausado (re-check) para {contact_name} ({contact_id})")
         return
 
+    # Silent hours (9pm–9am ET): send ONE brief message with next availability, then stop
+    if is_silent_hours():
+        _already_replied = await check_reminder_sent(contact_id, "silent_hours_reply", datetime.now(ET).strftime("%Y-%m-%d"))
+        if not _already_replied:
+            _lang = "en" if message and any(w in message.lower() for w in ["the","your","please","hi ","hello","yes","no "]) else "es"
+            _when = next_opening_label(_lang)
+            _contact_data = await get_contact(contact_id)
+            _first = (_contact_data or {}).get("firstName", "") or contact_name.split()[0] if contact_name else ""
+            _name_part = f" {_first}!" if _first else "!"
+            if _lang == "en":
+                _msg = f"Hi{_name_part} Our advisors are not available right now. Would you like to schedule a call {_when}? Just let us know what time works best for you."
+            else:
+                _msg = f"Hola{_name_part} En este momento no tenemos asesores disponibles. Te gustaria agendar una cita {_when}? Dinos que hora te queda mejor."
+            if channel == "SMS":
+                await send_sms(contact_id, _msg)
+            else:
+                await send_whatsapp(contact_id, _msg)
+            from app.supabase_client import log_reminder_sent as _log_rem
+            await _log_rem(contact_id, contact_name, 0, "silent_hours_reply", datetime.now(ET).strftime("%Y-%m-%d"))
+            print(f"[Webhook] Silent hours auto-reply sent to {contact_name}")
+        else:
+            print(f"[Webhook] SKIPPED — silent hours, already replied today to {contact_name}")
+        return
+
     # Re-check: if advisor responded within the last 15 min while we were waiting, stay silent
     # Also add bot-pausado so future messages skip this check entirely
     if await human_agent_active(contact_id, takeover_minutes=15):
@@ -269,7 +322,9 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
 
     # Get AI response — pasar si es horario hábil para ajustar el mensaje de cierre
     in_hours = is_business_hours()
-    ai_result = await get_ai_response(contact_id, message, contact_name, business_hours=in_hours, product=product)
+    _lang_hint = "en" if message and any(w in message.lower() for w in ["the","your","please","hi ","hello","yes","no "]) else "es"
+    _next_open = "" if in_hours else next_opening_label(_lang_hint)
+    ai_result = await get_ai_response(contact_id, message, contact_name, business_hours=in_hours, product=product, next_opening=_next_open)
     response_text = ai_result["response"]
     should_transfer = ai_result["should_transfer"]
 

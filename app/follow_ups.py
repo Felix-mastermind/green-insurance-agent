@@ -529,7 +529,14 @@ async def run_follow_ups(force: bool = False):
                 continue
 
             # 60+ day leads: check monthly so they only get one message per month
-            _log_granularity = today.strftime("%Y-%m") if "60+" in stage_name else today.strftime("%Y-%m-%d")
+            # Other leads: use a day-window so a lead with days=2 can only get one message every 2 days
+            if "60+" in stage_name:
+                _log_granularity = today.strftime("%Y-%m")
+            else:
+                from datetime import date as _date
+                _epoch = _date(2024, 1, 1)
+                _window = (today - _epoch).days // required_days
+                _log_granularity = f"w{_window}"
             already_sent = await check_reminder_sent(contact_id, f"followup_{product}_{stage_name[:15]}", _log_granularity)
             if already_sent:
                 skipped += 1
@@ -550,7 +557,7 @@ async def run_follow_ups(force: bool = False):
                 continue
             message = template.format(name=first_name) if template else ""
             followup_key_to_log = f"followup_{product}_{stage_name[:15]}"
-            log_period = _log_granularity
+            log_period = _log_granularity  # window key — prevents resend within required_days
         # Use AI to generate contextual message — reads full conversation so it never repeats
         is_stage_dynamic = stage_config.get("dynamic", False)
         conv_history = await get_conversation_history(contact_id, limit=10)

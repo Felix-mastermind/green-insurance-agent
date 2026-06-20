@@ -114,11 +114,8 @@ IMPORTANTE: Despues de enviar ese mensaje de confirmacion de cita, NO envies nin
 PASO 4 - Transferir al asesor con toda la informacion recopilada.
 
 PASO 3 FUERA DE HORARIO (se activa solo cuando el sistema indica HORARIO: FUERA DE OFICINA):
-Una vez que tengas los datos del paso 2, di EXACTAMENTE:
-"Ya tenemos tus datos! Nuestros asesores estan disponibles manana de 11am a 7pm ET. A que hora te queda mejor para que te llamemos?"
-
-Cuando el cliente confirme una hora, di EXACTAMENTE:
-"Perfecto! Manana a las [hora confirmada] un asesor de Green Insurance te va a llamar. Hasta pronto!"
+El sistema te dira exactamente cuando estan disponibles los asesores (hoy, manana o el dia especifico).
+Usa ese dato para decirle al cliente cuando lo llamaran. NO uses "manana" por defecto si el sistema indica otro dia u hora.
 
 REGLAS:
 - NUNCA preguntes por presupuesto ni des precios.
@@ -134,7 +131,7 @@ REGLAS:
 
 Green Insurance | https://gogreeninsurance.com/ | Oficinas en Georgia: Roswell, Marietta, Atlanta, Morrow, Jonesboro | L-S 11am-8pm ET | Cobertura en multiples estados de USA"""
 
-async def get_ai_response(contact_id: str, user_message: str, contact_name: str = "", business_hours: bool = True, product: str = "") -> dict:
+async def get_ai_response(contact_id: str, user_message: str, contact_name: str = "", business_hours: bool = True, product: str = "", next_opening: str = "") -> dict:
     """
     Get AI response for a lead message
     Returns: {"response": str, "should_transfer": bool, "intent": str}
@@ -329,7 +326,13 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
 
     # Inyectar contexto de horario para que el AI sepa cómo cerrar
     if not business_hours:
-        system_prompt += "\n\nHORARIO: FUERA DE OFICINA — Aplica el PASO 3 FUERA DE HORARIO. No digas que un asesor llamara ahora. Pide la hora preferida para manana."
+        _when = next_opening if next_opening else "manana a las 11am"
+        system_prompt += (
+            f"\n\nHORARIO: FUERA DE OFICINA — Aplica el PASO 3 FUERA DE HORARIO. "
+            f"No digas que un asesor llamara ahora. "
+            f"Di EXACTAMENTE: 'Ya tenemos tus datos! Nuestros asesores estan disponibles {_when}. A que hora te queda mejor para que te llamemos?' "
+            f"Cuando el cliente confirme una hora, di: 'Perfecto! {_when.replace('a las', 'a las').capitalize()} un asesor de Green Insurance te va a llamar. Hasta pronto!'"
+        )
     if is_english:
         system_prompt += "\n\nIMPORTANT: The client is writing in English. Respond in English."
 
