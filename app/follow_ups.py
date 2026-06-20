@@ -7,7 +7,8 @@ import pytz
 from datetime import datetime, timedelta
 from app.ghl_client import (
     get_opportunities, get_pipelines, send_whatsapp, send_sms, send_email, is_valid_email,
-    get_contact, add_contact_tag, create_task, get_contact_channel, add_bot_stamp
+    get_contact, add_contact_tag, create_task, get_contact_channel, add_bot_stamp,
+    has_recent_client_message
 )
 from app.supabase_client import check_reminder_sent, log_reminder_sent, get_conversation_history, save_conversation_message
 from app.claude_agent import get_ai_followup
@@ -540,6 +541,12 @@ async def run_follow_ups(force: bool = False):
             already_sent = await check_reminder_sent(contact_id, f"followup_{product}_{stage_name[:15]}", _log_granularity)
             if already_sent:
                 skipped += 1
+                continue
+
+            # Skip if client replied within the last 24h — they're already engaged
+            if await has_recent_client_message(contact_id, within_hours=24):
+                skipped += 1
+                print(f"[FollowUp] SKIP — client active in last 24h: {contact_id}")
                 continue
 
             try:

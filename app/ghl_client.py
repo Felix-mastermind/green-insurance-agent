@@ -682,6 +682,43 @@ async def get_latest_inbound_message(contact_id: str) -> dict | None:
         logger.error("[GHL] Error fetching latest message for %s: %s", contact_id, e)
         return None
 
+
+async def has_recent_client_message(contact_id: str, within_hours: int = 24) -> bool:
+    """Returns True if the client sent an inbound message within the last N hours.
+    Used to skip follow-ups when the client is actively engaged in conversation."""
+    try:
+        import dateutil.parser
+        from datetime import datetime, timezone, timedelta
+        conversations = await get_contact_conversations(contact_id)
+        if not conversations:
+            return False
+        conv_id = conversations[0].get("id", "")
+        if not conv_id:
+            return False
+        messages = await get_conversation_messages(conv_id, limit=20)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=within_hours)
+        for msg in messages:
+            direction = (msg.get("direction", "") or "").lower()
+            if direction not in ("inbound",):
+                continue
+            date_str = msg.get("dateAdded", "") or msg.get("createdAt", "") or msg.get("date", "")
+            if not date_str:
+                continue
+            try:
+                msg_time = dateutil.parser.parse(str(date_str))
+                if msg_time.tzinfo is None:
+                    msg_time = msg_time.replace(tzinfo=timezone.utc)
+                if msg_time >= cutoff:
+                    logger.info("[GHL] Recent client message found for %s (%.1f h ago)", contact_id,
+                                (datetime.now(timezone.utc) - msg_time).total_seconds() / 3600)
+                    return True
+            except Exception:
+                continue
+        return False
+    except Exception as e:
+        logger.error("[GHL] Error checking recent client message for %s: %s", contact_id, e)
+        return False
+
 # Stage IDs por pipeline para Wrong Number, Not Interested y Already Insured
 WRONG_NUMBER_STAGES = {
     "BdzkOH5twVi9sCK2ag96": "e1a24e5d-1781-4d15-b03c-6e17b4535fdd",  # Auto Mastermind
