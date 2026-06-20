@@ -615,11 +615,15 @@ async def human_agent_active(contact_id: str, takeover_minutes: int = 5) -> bool
             if not user_id:
                 continue  # No userId = not from a real agent
 
-            # KEY CHECK: Bot/API messages have meta.marketplace — human messages don't
+            # Skip messages from the bot user — never count as human takeover
+            if user_id == BOT_USER_ID:
+                logger.debug("[GHL] Skipping bot's own message (BOT_USER_ID=%s)", user_id)
+                continue
+
+            # Bot/API messages sometimes have meta.marketplace — also skip those
             meta = msg.get("meta", {}) or {}
             marketplace = meta.get("marketplace", "") if isinstance(meta, dict) else ""
             if marketplace:
-                # This is a bot/API message — skip it
                 logger.debug("[GHL] Skipping API message from userId=%s (has marketplace)", user_id)
                 continue
 
