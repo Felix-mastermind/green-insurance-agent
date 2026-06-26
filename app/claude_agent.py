@@ -28,350 +28,146 @@ def get_client():
         _client = anthropic.Anthropic(api_key=api_key)
     return _client
 
-SYSTEM_PROMPT_ES = """Eres el asistente virtual de Green Insurance. Tu UNICA funcion es agendar citas con un asesor.
 
-HORARIO DE ASESORES: Lunes a Sabado de 11am a 7pm hora de Nueva York (ET).
+SYSTEM_PROMPT_BASE = """Eres un asistente virtual de Green Insurance.
 
-TU UNICO OBJETIVO: Conseguir que el cliente agende una cita o acepte una llamada con un asesor en el proximo horario disponible.
+Tu funcion es atender a los leads que escriban fuera del horario de atencion, obtener su disponibilidad y programar una cita con el asesor asignado.
 
-FORMATO:
+HORARIO DE ATENCION (America/New_York):
+- Lunes a Viernes: 11:00 AM - 7:00 PM
+- Sabados: 11:00 AM - 6:00 PM
+- Domingos: Cerrado.
+
+PRIMER MENSAJE cuando el cliente escribe fuera del horario:
+"Hola! Gracias por comunicarte con Green Insurance. En este momento nuestros asesores no se encuentran disponibles, pero con gusto programaremos una llamada contigo. Prefieres que te contactemos en la manana o en la tarde? Si tienes una hora especifica, indicanos cual es y agendaremos tu cita."
+
+CUANDO EL CLIENTE RESPONDA CON UNA HORA:
+- "manana" → primera disponibilidad en la manana del dia siguiente.
+- "tarde" → primera disponibilidad en la tarde.
+- Hora especifica → usa esa hora exacta.
+
+ZONA HORARIA DEL CLIENTE — basate en el campo state del contacto:
+- California, Nevada, Oregon, Washington → America/Los_Angeles (PT, -3h vs ET)
+- Arizona → America/Phoenix (MT sin DST, -2h vs ET)
+- Colorado, Utah, Montana, Wyoming, New Mexico, Idaho → America/Denver (MT, -2h vs ET)
+- Texas, Illinois, Kansas, Oklahoma, Arkansas, Iowa, Minnesota, Missouri, Wisconsin, Louisiana, Mississippi, North Dakota, South Dakota, Nebraska → America/Chicago (CT, -1h vs ET)
+- Georgia, Florida, New York, Virginia, North Carolina, South Carolina, Tennessee, Alabama, Kentucky, Indiana, Ohio, Pennsylvania, Maryland, Delaware, New Jersey, Connecticut, Rhode Island, Massachusetts, Maine, New Hampshire, Vermont, West Virginia, DC → America/New_York (ET, sin diferencia)
+- Alaska → America/Anchorage (-4h vs ET)
+- Hawaii → Pacific/Honolulu (-5h vs ET)
+- Estado desconocido o vacio → America/New_York
+
+CONVERSION DE HORA (OBLIGATORIA — nunca omitir):
+La hora del cliente SIEMPRE es en su zona horaria local. NUNCA la interpretes como hora de New York.
+
+Proceso obligatorio antes de crear cualquier cita:
+1. Leer el campo state del contacto.
+2. Identificar la zona horaria del cliente.
+3. Interpretar la hora indicada por el cliente en su propia zona horaria.
+4. Convertir esa hora a America/New_York (zona del calendario del asesor).
+5. Crear la cita con la hora convertida.
+6. Confirmar al cliente usando su hora local.
+
+Ejemplos:
+- California, dice "8:00 AM" → crear cita 11:00 AM ET → confirmar "8:00 AM hora de California"
+- Texas, dice "2:00 PM" → crear cita 3:00 PM ET → confirmar "2:00 PM hora de Texas"
+
+CALENDARIO:
+- SIEMPRE usa el calendario del asesor asignado al lead. NUNCA reasignes ni cambies de asesor.
+- Si la hora solicitada no esta disponible, ofrece el espacio mas cercano disponible.
+- Nunca inventes horarios ni confirmes sin verificar disponibilidad.
+
+DESPUES DE CREAR LA CITA:
+Confirma al cliente con su hora local. Ejemplo:
+"Perfecto. Tu cita quedo programada para el [dia] a las [hora local del cliente]. Uno de nuestros asesores se comunicara contigo en ese horario."
+
+REGLAS CRITICAS:
+- Nunca menciones la hora en America/New_York al cliente — siempre su hora local.
 - Solo texto plano. Sin asteriscos, listas ni negritas.
-- Maximo 2 oraciones por mensaje.
-- Una sola pregunta a la vez.
-- NUNCA incluyas JSON, codigo ni corchetes.
+- Maximo 3 oraciones por mensaje. Una sola pregunta a la vez.
+- NUNCA incluyas JSON, codigo ni corchetes en tu respuesta.
+- Si no le interesa: "Entendido, gracias. Si en algun momento lo necesitas aqui estamos."
+- Si numero equivocado: "Entiendo, disculpa la molestia."
+- NUNCA hagas seguimiento. NUNCA pidas datos personales. Solo agenda la cita."""
 
-IDIOMA: Responde en el mismo idioma del cliente (espanol o ingles).
-
-FLUJO — solo estos pasos:
-
-1. Saluda brevemente e indica que puedes agendar una cita con un asesor de Green Insurance.
-
-2. Pregunta que dia y hora le queda mejor (de lunes a sabado, 11am-7pm ET).
-
-3. Cuando confirme: "Listo! El [dia] a las [hora] un asesor de Green Insurance se va a comunicar contigo. Hasta pronto!"
-   Despues de confirmar la cita NO envies ningun mensaje mas.
-
-Si el cliente pregunta sobre precios, coberturas u otra informacion: "Un asesor te puede dar todos los detalles. Que dia y hora te queda mejor para que te llame?"
-
-Si el cliente dice que no le interesa: "Entendido, gracias. Si en algun momento lo necesitas aqui estamos."
-
-Si el numero es equivocado: "Entiendo, disculpa la molestia."
-
-NUNCA hagas seguimiento, NUNCA preguntes por tipo de seguro, NUNCA pidas datos personales. Solo agenda la cita."""
-
-async def get_ai_response(contact_id: str, user_message: str, contact_name: str = "", business_hours: bool = True, product: str = "", next_opening: str = "") -> dict:
+async def get_ai_response(contact_id: str, user_message: str, contact_name: str = "", business_hours: bool = True, product: str = "", next_opening: str = "", client_state: str = "") -> dict:
     """
-    Get AI response for a lead message
-    Returns: {"response": str, "should_transfer": bool, "intent": str}
+    Get AI response — ONLY books appointments outside business hours.
+    Returns: {"response": str, "should_transfer": bool, "intent": str, "preferred_time": str}
     """
-    # Get conversation history
-    history = await get_conversation_history(contact_id, limit=8)
-
-    # Build messages for Claude
-    messages = []
-    for msg in history:
-        messages.append({
-            "role": msg["role"] if msg["role"] in ["user", "assistant"] else "user",
-            "content": msg["content"]
-        })
-
-    # Add current message
-    messages.append({"role": "user", "content": user_message})
-
-    # Transfer only when client explicitly wants to speak with someone
-    transfer_keywords = [
-        "asesor", "agente", "hablar con", "cotizar", "quiero comprar",
-        "want to talk", "speak with", "call me",
-        "precio exacto", "exact price", "quiero hablar", "conectame",
-    ]
-    # "quiero una cita" removed — handled by wants_appt_kw / wants_appointment intent
-    should_transfer = any(kw in user_message.lower() for kw in transfer_keywords)
-
-    # Context check: if client says "sí/yes/ok" and last bot message asked about an advisor
-    if not should_transfer and history:
-        affirmatives = {"sí", "si", "yes", "ok", "claro", "dale", "está bien", "esta bien",
-                        "adelante", "perfecto", "por favor", "please", "sure", "yep", "yeah"}
-        msg_clean = user_message.strip().lower().rstrip("!.¡")
-        if msg_clean in affirmatives or len(msg_clean) <= 4:
-            last_bot = next((m["content"] for m in reversed(history) if m["role"] == "assistant"), "")
-            advisor_question_kw = ["asesor", "agente", "llamar", "llamarte", "contactar",
-                                   "comunic", "hablar", "te llame", "te contacte"]
-            if any(kw in last_bot.lower() for kw in advisor_question_kw):
-                should_transfer = True
-
-    # Detect wrong_number and not_interested before calling AI
+    history = await get_conversation_history(contact_id, limit=6)
     msg_lower = user_message.lower()
-    wrong_number_keywords = [
-        "numero equivocado", "wrong number", "not my number", "equivocado",
-        "se equivocaron", "wrong person", "no soy", "not me"
-    ]
-    not_interested_keywords = [
-        # Español — variantes directas
-        "no me interesa", "no estoy interesado", "no interesado", "no gracias",
-        "no necesito", "no quiero", "no por favor",
-        # Variantes "por el momento / ahora"
-        "por el momento", "por ahora no", "ahorita no", "no por ahora",
-        "no por el momento", "en este momento no", "al momento no",
-        "de momento no", "por los momentos", "no en este momento",
-        "por el momento no", "no por el momento gracias",
-        # Rechazo suave
-        "no estoy interesada", "no me interesaria", "no me interesaría",
-        "no está en mis planes", "no esta en mis planes",
-        "no lo necesito", "no aplica", "no aplica para mi",
-        # Inglés
-        "not interested", "no thank you", "don't need", "dont need",
-        "not right now", "maybe later", "no thanks",
-        # "No me molesten" y variantes directas de parar contacto
-        "no molesten", "ya no molesten", "no me molesten", "dejen de escribir",
-        "dejen de mandar", "no me escriban", "no me manden", "paren de escribir",
-        "ya no quiero", "borrenme", "quitenme", "no quiero que me llamen",
-        "no quiero mensajes", "no contacten", "no me contacten",
-        # Opt-out / SMS unsubscribe keywords (GHL enables DND automatically on these)
-        "stop", "unsubscribe", "cancel", "opt out", "optout",
-        "remove me", "no more messages", "stop messages", "do not contact",
-    ]
-    already_insured_keywords = [
-        # Español — frases completas
-        "ya tengo seguro", "tengo seguro", "ya tengo un seguro", "tengo un seguro",
-        "ya tengo cobertura", "tengo cobertura", "ya estoy asegurado", "ya estoy asegurada",
-        "ya tengo uno", "ya tengo una",
-        # Frases cortas comunes
-        "ya tengo", "ya lo tengo", "ya tenemos", "tenemos seguro",
-        "ya cuento con", "cuento con seguro",
-        # Inglés
-        "already have insurance", "already insured", "i have insurance",
-        "i have coverage", "i'm already covered", "already covered",
-        "i have a policy", "have insurance",
-    ]
-    if any(kw in msg_lower for kw in wrong_number_keywords):
+
+    # Wrong number — short circuit
+    if any(kw in msg_lower for kw in ["numero equivocado", "wrong number", "equivocado", "not my number", "no soy"]):
         reply = "Entiendo, disculpa la molestia."
         await save_conversation_message(contact_id, "user", user_message)
         await save_conversation_message(contact_id, "assistant", reply)
         return {"response": reply, "should_transfer": False, "intent": "wrong_number", "preferred_time": ""}
-    if any(kw in msg_lower for kw in already_insured_keywords):
-        product_lower = product.lower()
-        if "life" in product_lower or "vida" in product_lower:
-            reply = ("Entendido! Muchas veces podemos encontrar mejores precios o mayores beneficios "
-                     "que tu poliza actual de vida. Te interesaria que un asesor compare tu cobertura "
-                     "actual con nuestras opciones sin ningun compromiso?")
-        elif "auto" in product_lower:
-            reply = ("Entendido! Con frecuencia logramos conseguir mejores precios o mayores "
-                     "beneficios que tu seguro actual de auto. Te gustaria que un asesor compare "
-                     "tu cobertura y te diga si podemos mejorarla?")
-        elif "dental" in product_lower:
-            reply = ("Entendido! Ademas de dental, tambien ofrecemos seguros de salud, vida, auto "
-                     "y comercial. Hay algun otro tipo de seguro en el que te podamos ayudar?")
-        elif "health" in product_lower or "salud" in product_lower:
-            reply = ("Entendido! Podemos revisar si hay opciones con mejores precios o coberturas "
-                     "adicionales disponibles para ti. Te gustaria que un asesor te contacte?")
-        else:
-            reply = ("Entendido! Si en algun momento quieres comparar opciones o mejorar tu "
-                     "cobertura, aqui estamos. Que tengas un buen dia!")
-        await save_conversation_message(contact_id, "user", user_message)
-        await save_conversation_message(contact_id, "assistant", reply)
-        return {"response": reply, "should_transfer": False, "intent": "already_insured", "preferred_time": ""}
-    if any(kw in msg_lower for kw in not_interested_keywords):
-        reply = "Entendido, gracias por tu tiempo. Si en el futuro necesitas un seguro, aqui estaremos."
+
+    # Not interested / opt-out — short circuit
+    not_interested_kw = [
+        "no me interesa", "no estoy interesado", "no gracias", "no necesito", "no quiero",
+        "not interested", "no thank you", "no thanks", "dont need", "don't need",
+        "no molesten", "ya no molesten", "no me molesten", "dejen de", "no me escriban",
+        "stop", "unsubscribe", "remove me", "do not contact",
+    ]
+    if any(kw in msg_lower for kw in not_interested_kw):
+        reply = "Entendido, gracias. Si en algun momento lo necesitas aqui estamos."
         await save_conversation_message(contact_id, "user", user_message)
         await save_conversation_message(contact_id, "assistant", reply)
         return {"response": reply, "should_transfer": False, "intent": "not_interested", "preferred_time": ""}
 
-    # Detect language — default Spanish, switch to English only if clearly English
-    # Check Spanish first: if Spanish words present, always respond in Spanish
-    spanish_indicators = [
-        "hola", "gracias", "que ", "como ", "cómo", "por favor", "buenos", "buenas",
-        "tengo", "necesito", "quiero", "puedo", "puede", "para ", "con ", "del ",
-        "los ", "las ", "una ", "uno ", "estoy", "soy ", "este", "seguro", "favor",
-        "plis", "pliss", "porfa", "quisiera", "interesa", "lugares", "información",
-        "informacion", "también", "tambien", "cuánto", "cuanto", "dónde", "donde",
-        "cuál", "cual", "cuales", "cuáles", "me ", "mi ", "mí", "más", "mas ",
-        "está", "esta ", "están", "estan", "tiene", "queda", "seria", "sería",
-        "bien", "bueno", "buena", "mejor", "cuando", "cuándo",
-    ]
-    # English indicators — only unambiguous English words (avoid "me", "no", "si", etc.)
-    english_indicators = [
-        "hello", "hi ", "hey ", " i ", "i'm", "i am", "my name", "do you",
-        "can you", "please", "thanks", "thank you",
-        "what is", "how much", "where is", "when can", "the insurance",
-    ]
-    padded = f" {msg_lower} "
-    is_spanish = any(ind in padded for ind in spanish_indicators)
-    is_english = (not is_spanish) and any(ind in padded for ind in english_indicators)
-    system_prompt = SYSTEM_PROMPT_ES
-
-    # First contact — inject intro + product context so bot doesn't ask what they already told us
-    is_first_contact = len(history) == 0
     name_hint = contact_name.split()[0] if contact_name else ""
-    product_known = product.strip().lower() if product else ""
+    system_prompt = SYSTEM_PROMPT_BASE
 
-    # Product context: always inject when known so the AI never asks again mid-conversation
-    if product_known:
-        if is_english:
-            system_prompt += (
-                f"\n\nPRODUCTO CONOCIDO: El cliente esta en el pipeline de '{product}'. "
-                f"NUNCA preguntes que tipo de seguro necesita — ya lo sabemos. "
-                f"Sal de PASO 1 y ve directo a PASO 2 para {product}."
-            )
-        else:
-            system_prompt += (
-                f"\n\nPRODUCTO CONOCIDO: El cliente esta en el pipeline de '{product}'. "
-                f"NUNCA preguntes que tipo de seguro necesita — ya lo sabemos. "
-                f"Sal de PASO 1 y ve directo a PASO 2 para {product}."
-            )
+    # Inject state so AI can determine client's timezone
+    state_clean = (client_state or "").strip()
+    if state_clean:
+        system_prompt += f"\n\nESTADO DEL CLIENTE: {state_clean}"
+    else:
+        system_prompt += "\n\nESTADO DEL CLIENTE: desconocido — usar America/New_York"
 
-    if is_first_contact:
-        if product_known:
-            if is_english:
-                system_prompt += (
-                    f"\n\nPRIMER MENSAJE: Presentate brevemente y CONFIRMA el producto. Ejemplo: "
-                    f"'Hi{' ' + name_hint if name_hint else ''}! I'm the Green Insurance virtual assistant 😊 "
-                    f"I see you're interested in {product} insurance — is that right? "
-                    f"[Then go straight to PASO 2 questions for {product}]'"
-                )
-            else:
-                system_prompt += (
-                    f"\n\nPRIMER MENSAJE: Presentate brevemente y CONFIRMA el producto directamente. Ejemplo: "
-                    f"'Hola{' ' + name_hint if name_hint else ''}! Soy el Asistente Virtual de Green Insurance 😊 "
-                    f"Veo que estas interesado en seguro de {product}, es correcto? "
-                    f"[Luego ve directo a las preguntas del PASO 2 para {product}]'"
-                )
-        else:
-            if is_english:
-                system_prompt += (
-                    f"\n\nFIRST MESSAGE: Introduce yourself briefly, then ask what type of insurance "
-                    f"they need. Example: 'Hi{' ' + name_hint if name_hint else ''}! "
-                    f"I'm the Green Insurance virtual assistant 😊 "
-                    f"I'm here to help you find the best coverage. "
-                    f"What type of insurance are you interested in?'"
-                )
-            else:
-                system_prompt += (
-                    f"\n\nPRIMER MENSAJE: Presentate brevemente y pregunta el tipo de seguro. Ejemplo: "
-                    f"'Hola{' ' + name_hint if name_hint else ''}! Soy el Asistente Virtual de Green Insurance 😊 "
-                    f"Estoy aqui para ayudarte a encontrar el mejor seguro. "
-                    f"En que tipo de seguro estas interesado?'"
-                )
+    if name_hint:
+        system_prompt += f"\nNOMBRE DEL CLIENTE: {name_hint}. Usalo al saludar."
 
-    # Inyectar contexto de horario para que el AI sepa cómo cerrar
-    if not business_hours:
-        _when = next_opening if next_opening else "manana a las 11am"
-        system_prompt += (
-            f"\n\nHORARIO: FUERA DE OFICINA — Aplica el PASO 3 FUERA DE HORARIO. "
-            f"No digas que un asesor llamara ahora. "
-            f"Di EXACTAMENTE: 'Ya tenemos tus datos! Nuestros asesores estan disponibles {_when}. A que hora te queda mejor para que te llamemos?' "
-            f"Cuando el cliente confirme una hora, di: 'Perfecto! {_when.replace('a las', 'a las').capitalize()} un asesor de Green Insurance te va a llamar. Hasta pronto!'"
-        )
+    # Language hint
+    english_indicators = ["hello", "hi ", "hey ", " i ", "i'm", "i am", "please", "thanks", "thank you", "what", "how much", "when can"]
+    is_english = any(ind in f" {msg_lower} " for ind in english_indicators)
     if is_english:
-        system_prompt += "\n\nIMPORTANT: The client is writing in English. Respond in English."
+        system_prompt += "\n\nRespond in English."
 
-    # Push to close fast — after 3+ exchanges, stop collecting info and transfer
-    if len(history) >= 3:
-        system_prompt += (
-            "\n\nATENCION — CIERRA YA: Ya tuviste suficientes intercambios con este lead. "
-            "NO sigas haciendo preguntas. Ve DIRECTO al PASO 3: pregunta si prefiere llamada ahora o cita. "
-            "Maximo 1 oracion. El asesor humano se encargara del resto."
-        )
+    messages = []
+    for msg in history:
+        messages.append({"role": msg["role"] if msg["role"] in ["user", "assistant"] else "user", "content": msg["content"]})
+    messages.append({"role": "user", "content": user_message})
 
     try:
         response = get_client().messages.create(
-            model="claude-sonnet-4-5",  # Current model (June 2026)
-            max_tokens=200,  # Reduced to keep responses short
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
             system=system_prompt,
             messages=messages
         )
         ai_text = clean_ai_response(response.content[0].text)
-
-        # Save to conversation history
         await save_conversation_message(contact_id, "user", user_message)
         await save_conversation_message(contact_id, "assistant", ai_text)
 
-        # Detect intent from response
+        # Detect appointment confirmed
+        ai_lower = ai_text.lower()
+        appt_confirmed = any(kw in ai_lower for kw in ["listo!", "listo,", "agendad", "confirmad", "te va a llamar", "se va a comunicar"])
+        day_mentioned = any(w in msg_lower for w in ["lunes","martes","miercoles","jueves","viernes","sabado","monday","tuesday","wednesday","thursday","friday","saturday","tomorrow","manana","mañana"])
+
         intent = "general"
         preferred_time = ""
-        wants_call_kw = [
-            "llamar", "llamen", "call me", "call now", "ahora", "now",
-            "inmediato", "quiero que me llamen", "me interesa", "si me interesa",
-            "quiero cotizar", "quiero comparar", "si quiero", "claro que si",
-        ]
-        wants_appt_kw = [
-            "cita", "appointment", "agendar", "schedule", "programar"
-        ]
-        # Detect appointment confirmation ONLY from specific phrases in AI response
-        # (must be unambiguous — avoid short words like "listo" that appear in many contexts)
-        appt_confirmed_kw = [
-            "quedo agendada", "quedó agendada", "cita agendada", "appointment booked",
-            "agendado para el", "te va a llamar el", "te llamara el",
-        ]
-        ai_lower = ai_text.lower()
-
-        # Detect not_interested from AI response as fallback
-        # (catches soft rejections the keyword list may have missed)
-        not_interested_ai_kw = [
-            "gracias por tu tiempo", "si en el futuro necesitas",
-            "aqui estaremos", "aquí estaremos", "que tengas un buen",
-            "if you ever need", "feel free to reach out",
-            "good luck", "take care", "cuídate", "cuitate",
-        ]
-
-        if any(w in msg_lower for w in wants_call_kw):
-            intent = "wants_call"
-        elif any(w in msg_lower for w in wants_appt_kw) or (
-                any(w in ai_lower for w in appt_confirmed_kw) and
-                any(w in msg_lower for w in ["lunes","martes","miércoles","miercoles","jueves",
-                                              "viernes","manana","mañana","monday","tuesday",
-                                              "wednesday","thursday","friday","tomorrow",
-                                              "am","pm",":"])):
+        if appt_confirmed and day_mentioned:
             intent = "wants_appointment"
             preferred_time = user_message
-        elif any(w in msg_lower for w in ["precio", "costo", "price", "cost", "cuanto"]):
-            intent = "pricing"
-        else:
-            # Cross-sell detection: client mentions a DIFFERENT insurance type than current pipeline
-            _product_type_kw = {
-                "dental":     ["dental", "dientes", "teeth", "dentista"],
-                "life":       ["vida", "life insurance", "seguro de vida"],
-                "health":     ["salud", "health insurance", "seguro de salud", "medico"],
-                "auto":       ["auto", "carro", "coche", "car ", "vehiculo", "truck"],
-                "commercial": ["comercial", "commercial", "negocio", "business", "empresa"],
-            }
-            def _detect_type(text: str) -> str:
-                tl = text.lower()
-                for prod, kws in _product_type_kw.items():
-                    if any(kw in tl for kw in kws):
-                        return prod
-                return ""
 
-            current_type = _detect_type(product)
-            mentioned_type = _detect_type(user_message)
-            if mentioned_type and current_type and mentioned_type != current_type:
-                intent = "cross_sell"
-                preferred_time = mentioned_type  # reuse field to carry target product
-            elif any(w in msg_lower for w in ["dental", "salud", "health", "auto", "vida", "life"]):
-                intent = "product_interest"
-
-        # Fallback: if AI said goodbye/farewell → not_interested (soft rejection)
-        if intent == "general" and any(w in ai_lower for w in not_interested_ai_kw):
-            intent = "not_interested"
-
-        return {
-            "response": ai_text,
-            "should_transfer": should_transfer,
-            "intent": intent,
-            "preferred_time": preferred_time,
-        }
+        return {"response": ai_text, "should_transfer": False, "intent": intent, "preferred_time": preferred_time}
 
     except Exception as e:
         print(f"[Claude Agent] Error: {e}")
-        # Fallback message
-        fallback = ("Hola! Gracias por contactar a Green Insurance. "
-                    "Un asesor se comunicara contigo en breve. "
-                    "Si es urgente, llamanos directamente.")
-        return {
-            "response": fallback,
-            "should_transfer": True,
-            "intent": "error",
-            "preferred_time": "",
-        }
+        return {"response": "Hola! Gracias por contactar a Green Insurance. Un asesor se comunicara contigo pronto.", "should_transfer": False, "intent": "error", "preferred_time": ""}
 
 
 FOLLOWUP_SYSTEM_PROMPT = """Eres el asistente virtual de Green Insurance, agencia de seguros en USA.

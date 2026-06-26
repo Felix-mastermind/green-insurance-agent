@@ -23,18 +23,25 @@ AGENTS = {
 BARBARA_CONTACT_ID = "Fr2WbOMJcsnKPC01S0Dz"
 REVIEW_LINK = "https://share.google/07auFx6a4aT7D7ht6"
 
-BUSINESS_HOURS_START = 11  # 11:00 AM ET
-BUSINESS_HOURS_END   = 20  # 8:00 PM ET
-BUSINESS_DAYS        = {0, 1, 2, 3, 4, 5}  # Lunes a Sabado
-
+BUSINESS_HOURS_START         = 11  # 11:00 AM ET — todos los días hábiles
+BUSINESS_HOURS_END_WEEKDAY   = 19  # 7:00 PM ET — Lunes a Viernes
+BUSINESS_HOURS_END_SATURDAY  = 18  # 6:00 PM ET — Sábado
+# weekday(): 0=Lun, 5=Sab, 6=Dom (cerrado)
+BUSINESS_DAYS_WEEKDAY = {0, 1, 2, 3, 4}  # Lunes a Viernes
+BUSINESS_DAY_SATURDAY = 5
 
 SILENT_HOURS_START = 21  # 9:00 PM ET — bot stops responding
 SILENT_HOURS_END   = 9   # 9:00 AM ET — bot resumes
 
 def is_business_hours() -> bool:
-    """Retorna True si es L-S 11am-8pm ET."""
+    """Retorna True si es horario hábil: L-V 11am-7pm ET, Sab 11am-6pm ET."""
     now = datetime.now(ET)
-    return now.weekday() in BUSINESS_DAYS and BUSINESS_HOURS_START <= now.hour < BUSINESS_HOURS_END
+    wd = now.weekday()
+    if wd in BUSINESS_DAYS_WEEKDAY:
+        return BUSINESS_HOURS_START <= now.hour < BUSINESS_HOURS_END_WEEKDAY
+    if wd == BUSINESS_DAY_SATURDAY:
+        return BUSINESS_HOURS_START <= now.hour < BUSINESS_HOURS_END_SATURDAY
+    return False  # Domingo — cerrado
 
 
 def is_silent_hours() -> bool:
@@ -44,12 +51,15 @@ def is_silent_hours() -> bool:
 
 
 def next_business_opening() -> datetime:
-    """Retorna el datetime del próximo inicio de horario hábil (11am ET)."""
+    """Retorna el datetime del próximo inicio de horario hábil (11am ET).
+    L-V: 11am-7pm, Sab: 11am-6pm, Dom: cerrado."""
     now = datetime.now(ET)
     candidate = now.replace(hour=BUSINESS_HOURS_START, minute=0, second=0, microsecond=0)
     if now >= candidate:
         candidate += timedelta(days=1)
-    while candidate.weekday() not in BUSINESS_DAYS or candidate.hour >= BUSINESS_HOURS_END:
+        candidate = candidate.replace(hour=BUSINESS_HOURS_START, minute=0, second=0, microsecond=0)
+    # Skip Sunday (6) — cerrado
+    while candidate.weekday() == 6:
         candidate += timedelta(days=1)
         candidate = candidate.replace(hour=BUSINESS_HOURS_START, minute=0, second=0, microsecond=0)
     return candidate
@@ -246,6 +256,11 @@ async def notify_advisor_no_reply(contact_id: str, contact_name: str, product: s
 
 async def process_inbound_message(contact_id: str, message: str, channel: str, contact_name: str, assigned_user_id: str = ""):
     """Process incoming message from a lead"""
+    import os
+    if os.environ.get("AGENT_ENABLED", "true").lower() == "false":
+        print(f"[Webhook] AGENT DISABLED — skipping all processing for {contact_name}")
+        return
+
     print(f"[Webhook] Inbound {channel} from {contact_name} ({contact_id}): {message[:50]}...")
 
     # Re-check bot-pausado — tag may have been added while job was queued
@@ -253,14 +268,17 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         print(f"[Webhook] SKIPPED — bot pausado (re-check) para {contact_name} ({contact_id})")
         return
 
+    # Fetch contact data once — used for state field and name
+    _contact_data = await get_contact(contact_id)
+    client_state = (_contact_data or {}).get("state", "") or ""
+
     # Silent hours (9pm–9am ET): send ONE brief message with next availability, then stop
     if is_silent_hours():
         _already_replied = await check_reminder_sent(contact_id, "silent_hours_reply", datetime.now(ET).strftime("%Y-%m-%d"))
         if not _already_replied:
             _lang = "en" if message and any(w in message.lower() for w in ["the","your","please","hi ","hello","yes","no "]) else "es"
             _when = next_opening_label(_lang)
-            _contact_data = await get_contact(contact_id)
-            _first = (_contact_data or {}).get("firstName", "") or contact_name.split()[0] if contact_name else ""
+            _first = (_contact_data or {}).get("firstName", "") or (contact_name.split()[0] if contact_name else "")
             _name_part = f" {_first}!" if _first else "!"
             if _lang == "en":
                 _msg = f"Hi{_name_part} Our advisors are not available right now. Would you like to schedule a call {_when}? Just let us know what time works best for you."
@@ -275,6 +293,11 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
             print(f"[Webhook] Silent hours auto-reply sent to {contact_name}")
         else:
             print(f"[Webhook] SKIPPED — silent hours, already replied today to {contact_name}")
+        return
+
+    # Business hours (11am–7pm ET): advisors handle — bot stays silent
+    if is_business_hours():
+        print(f"[Webhook] SKIPPED — business hours, advisors handle: {contact_name}")
         return
 
     # Re-check: if advisor responded within the last 15 min while we were waiting, stay silent
@@ -326,14 +349,11 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         print(f"[Webhook] OPT-OUT '{msg_stripped}' from {contact_name} — moved to Not Interested + bot-pausado")
         return  # No reply
 
-    # Pre-fetch pipeline so AI can give product-specific responses (e.g. already_insured)
+    # Pre-fetch pipeline (product info for intent logging)
     _, product = await get_contact_pipeline(contact_id)
 
-    # Get AI response — pasar si es horario hábil para ajustar el mensaje de cierre
-    in_hours = is_business_hours()
-    _lang_hint = "en" if message and any(w in message.lower() for w in ["the","your","please","hi ","hello","yes","no "]) else "es"
-    _next_open = "" if in_hours else next_opening_label(_lang_hint)
-    ai_result = await get_ai_response(contact_id, message, contact_name, business_hours=in_hours, product=product, next_opening=_next_open)
+    # Get AI response — always outside business hours here (checked above)
+    ai_result = await get_ai_response(contact_id, message, contact_name, business_hours=False, product=product, next_opening="", client_state=client_state)
     response_text = ai_result["response"]
     should_transfer = ai_result["should_transfer"]
 
@@ -396,17 +416,8 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
                 phone = (contact_info or {}).get("phone", "") or ""
                 phone_str = " | Tel: " + phone if phone else ""
                 product_str = " | Seguro: " + product if product else ""
-                if in_hours:
-                    ghl_link = f"https://app.gohighlevel.com/contacts/{contact_id}"
-                    note_text = f"📅 CITA AGENDADA — {contact_name}{phone_str}{product_str}. Revisa tu calendario. {ghl_link}"
-                    await add_internal_note(contact_id, note_text)
-                    alert_msg = f"📅 Cita agendada | Lead: {contact_name}{phone_str}{product_str}. Revisa calendario: {ghl_link}"
-                    pip_id = await get_notification_recipients(contact_id, assigned_uid)
-                    if pip_id == PIPELINE_AUTO_MASTERMIND:
-                        await notify_mastermind_staff(contact_id, alert_msg, assigned_uid)
-                    else:
-                        await send_sms(BARBARA_CONTACT_ID, alert_msg)
-                    print(f"[Webhook] {contact_name} appointment booked (in hours) — advisor notified")
+                if False:
+                    pass  # bot never runs during business hours
                 else:
                     reminder_time = next_business_opening()
                     job_id = f"reminder_{contact_id}_{int(reminder_time.timestamp())}"
@@ -479,24 +490,12 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         _skip = {"appointment booked", "hot lead", "hot leads", "cita agendada", "quoted"}
         if any(s in _current_stage for s in _skip):
             print(f"[Webhook] Transfer skipped — {contact_name} already in stage '{_current_stage}'")
-        elif in_hours:
-            transfer_msg = ("Un asesor de Green Insurance se comunicara contigo en breve. "
-                            "Gracias por tu paciencia!")
-            if channel == "SMS":
-                await send_sms(contact_id, transfer_msg)
-            else:
-                await send_whatsapp(contact_id, transfer_msg)
-            moved = await move_to_hot_lead(contact_id)
-            await add_contact_tag(contact_id, "necesita-asesor")
-            await add_contact_tag(contact_id, "bot-pausado")
-            _cancel_job(f"bot_reply_{contact_id}")
-            print(f"[Webhook] Transfer (in hours) for {contact_name} — HOT Lead: {moved} + bot pausado")
         else:
             moved = await move_to_hot_lead(contact_id)
             await add_contact_tag(contact_id, "llamar-manana")
             await add_contact_tag(contact_id, "bot-pausado")
             _cancel_job(f"bot_reply_{contact_id}")
-            print(f"[Webhook] Transfer (out of hours) for {contact_name} — HOT Lead + bot pausado")
+            print(f"[Webhook] Transfer for {contact_name} — HOT Lead + bot pausado")
 
 def extract_message_body(payload: dict) -> str:
     """Extract message text from various GHL payload formats"""
