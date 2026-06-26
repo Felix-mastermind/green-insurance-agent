@@ -46,20 +46,11 @@ async def lifespan(app: FastAPI):
         print(f"[Route] {','.join(route['methods'])} {route['path']} -> {route['name']}")
 
 
-    # Renewal reminders - daily at 10:00am ET
-    scheduler.add_job(
-        run_renewal_reminders,
-        CronTrigger(hour=10, minute=0, timezone=ET),
-        id="renewal_reminders",
-        name="Renewal Reminders",
-        replace_existing=True
-    )
-
-    # Follow-ups DESACTIVADOS — bot solo agenda citas via inbound
+    # Sin jobs proactivos — bot solo responde inbound para agendar citas
 
     scheduler.start()
 
-    print("[Agent] Scheduler started. Jobs: renewals (10am ET)")
+    print("[Agent] Scheduler started. No proactive jobs.")
     print("[Agent] Ready to receive webhooks from GHL")
 
     yield
