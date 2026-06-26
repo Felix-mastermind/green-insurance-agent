@@ -55,29 +55,11 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
 
-    # Follow-ups - 2:00pm and 4:30pm ET
-    scheduler.add_job(
-        run_follow_ups,
-        CronTrigger(hour=14, minute=0, timezone=ET),
-        id="follow_ups_1400",
-        name="Follow Ups 14:00",
-        replace_existing=True
-    )
-    scheduler.add_job(
-        run_follow_ups,
-        CronTrigger(hour=16, minute=30, timezone=ET),
-        id="follow_ups_1630",
-        name="Follow Ups 16:30",
-        replace_existing=True
-    )
+    # Follow-ups DESACTIVADOS — bot solo agenda citas via inbound
 
     scheduler.start()
 
-    # Run follow-ups immediately on startup to catch all existing leads
-    import asyncio
-    asyncio.get_event_loop().create_task(run_follow_ups(force=True))
-    print("[Agent] Startup follow-up triggered — reviewing all leads")
-    print("[Agent] Scheduler started. Jobs: renewals (10am), follow-ups (2pm/4:30pm ET)")
+    print("[Agent] Scheduler started. Jobs: renewals (10am ET)")
     print("[Agent] Ready to receive webhooks from GHL")
 
     yield
