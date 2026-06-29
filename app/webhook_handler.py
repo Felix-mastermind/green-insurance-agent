@@ -396,8 +396,6 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         print(f"[Webhook] {contact_name} wants call — HOT Lead + advisor notified + bot pausado")
 
     elif intent == "wants_appointment":
-        # Only create appointment when client has given a specific day or time.
-        # If they just said "cita/programar" without day/time, bot already asked — wait.
         preferred_time = ai_result.get("preferred_time", "")
         _time_indicators = [
             "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes",
@@ -408,9 +406,15 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         if not _has_time:
             print(f"[Webhook] {contact_name} wants appointment but no day/time yet — waiting for client to specify")
         else:
-            assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
-            appt = await create_appointment(contact_id, contact_name, assigned_uid, preferred_time)
-            if appt.get("id") or appt.get("appointmentId"):
+            # assigned_uid: payload → opportunity → contact owner
+            assigned_uid = (assigned_user_id
+                            or await get_opportunity_assigned_user(contact_id)
+                            or (_contact_data or {}).get("assignedTo", ""))
+            appt = await create_appointment(contact_id, contact_name, assigned_uid, preferred_time,
+                                            client_state=client_state)
+            appt_id = (appt.get("id") or appt.get("appointmentId")
+                       or (appt.get("appointment") or {}).get("id", ""))
+            if appt_id:
                 await move_to_appointment_booked(contact_id)
                 contact_info = await get_contact(contact_id)
                 phone = (contact_info or {}).get("phone", "") or ""

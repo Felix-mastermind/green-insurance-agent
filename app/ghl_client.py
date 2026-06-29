@@ -1002,25 +1002,121 @@ async def notify_advisor_call_requested(contact_id: str, contact_name: str, assi
         # Life, Dental, other → SMS to Barbara
         await send_sms(BARBARA_CONTACT_ID, alert_msg)
 
+def _next_weekday(from_date, weekday: int):
+    """Return the next date (from_date exclusive) that falls on weekday (0=Mon…6=Sun)."""
+    from datetime import timedelta
+    days_ahead = weekday - from_date.weekday()
+    if days_ahead <= 0:
+        days_ahead += 7
+    return from_date + timedelta(days=days_ahead)
+
+_STATE_TZ_MAP = {
+    # PT
+    "california": "America/Los_Angeles", "ca": "America/Los_Angeles",
+    "nevada": "America/Los_Angeles",     "nv": "America/Los_Angeles",
+    "oregon": "America/Los_Angeles",     "or": "America/Los_Angeles",
+    "washington": "America/Los_Angeles", "wa": "America/Los_Angeles",
+    # MT
+    "arizona": "America/Phoenix",        "az": "America/Phoenix",
+    "colorado": "America/Denver",        "co": "America/Denver",
+    "utah": "America/Denver",            "ut": "America/Denver",
+    "montana": "America/Denver",         "mt": "America/Denver",
+    "wyoming": "America/Denver",         "wy": "America/Denver",
+    "new mexico": "America/Denver",      "nm": "America/Denver",
+    "idaho": "America/Denver",           "id": "America/Denver",
+    # CT
+    "texas": "America/Chicago",          "tx": "America/Chicago",
+    "illinois": "America/Chicago",       "il": "America/Chicago",
+    "kansas": "America/Chicago",         "ks": "America/Chicago",
+    "oklahoma": "America/Chicago",       "ok": "America/Chicago",
+    "arkansas": "America/Chicago",       "ar": "America/Chicago",
+    "iowa": "America/Chicago",           "ia": "America/Chicago",
+    "minnesota": "America/Chicago",      "mn": "America/Chicago",
+    "missouri": "America/Chicago",       "mo": "America/Chicago",
+    "wisconsin": "America/Chicago",      "wi": "America/Chicago",
+    "louisiana": "America/Chicago",      "la": "America/Chicago",
+    "mississippi": "America/Chicago",    "ms": "America/Chicago",
+    "nebraska": "America/Chicago",       "ne": "America/Chicago",
+    "north dakota": "America/Chicago",   "nd": "America/Chicago",
+    "south dakota": "America/Chicago",   "sd": "America/Chicago",
+    # AK / HI
+    "alaska": "America/Anchorage",       "ak": "America/Anchorage",
+    "hawaii": "Pacific/Honolulu",        "hi": "Pacific/Honolulu",
+}
+
 async def create_appointment(contact_id: str, contact_name: str, assigned_user_id: str,
-                              preferred_time_str: str, calendar_id: str = "") -> dict:
-    """Create a GHL appointment for the contact"""
+                              preferred_time_str: str, calendar_id: str = "",
+                              client_state: str = "") -> dict:
+    """Create a GHL appointment. Parses day/time from preferred_time_str and converts
+    from client's local timezone (based on client_state) to America/New_York."""
+    import re
     from datetime import datetime, timedelta
     import pytz
 
     if not calendar_id:
         calendar_id = AGENTS_CALENDARS.get(assigned_user_id, DEFAULT_CALENDAR_ID)
 
-    # Default to next business day 2pm ET if can't parse
     ET = pytz.timezone("America/New_York")
     now = datetime.now(ET)
-    # Simple: book 24h from now at 2pm ET
-    appt_time = now.replace(hour=14, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    if appt_time.weekday() == 6:  # Sunday only → move to Monday
-        appt_time += timedelta(days=1)
+    today = now.date()
+
+    # Determine client timezone
+    tz_name = _STATE_TZ_MAP.get((client_state or "").lower().strip(), "America/New_York")
+    client_tz = pytz.timezone(tz_name)
+
+    text = (preferred_time_str or "").lower()
+
+    # --- Parse target date ---
+    if "mañana" in text or "manana" in text or "tomorrow" in text:
+        target_date = today + timedelta(days=1)
+    elif "lunes" in text or "monday" in text:
+        target_date = _next_weekday(today, 0)
+    elif "martes" in text or "tuesday" in text:
+        target_date = _next_weekday(today, 1)
+    elif "miércoles" in text or "miercoles" in text or "wednesday" in text:
+        target_date = _next_weekday(today, 2)
+    elif "jueves" in text or "thursday" in text:
+        target_date = _next_weekday(today, 3)
+    elif "viernes" in text or "friday" in text:
+        target_date = _next_weekday(today, 4)
+    elif "sábado" in text or "sabado" in text or "saturday" in text:
+        target_date = _next_weekday(today, 5)
+    else:
+        target_date = today + timedelta(days=1)
+    # Skip Sunday
+    if target_date.weekday() == 6:
+        target_date += timedelta(days=1)
+
+    # --- Parse time (client's local time) ---
+    hour, minute = 14, 0  # default 2pm
+    m = re.search(r'(\d{1,2}):(\d{2})\s*(am|pm)?', text)
+    if not m:
+        m = re.search(r'(\d{1,2})\s*(am|pm)', text)
+    if m:
+        groups = m.groups()
+        if len(groups) == 3:
+            h, mi, meridiem = int(groups[0]), int(groups[1]), (groups[2] or "")
+        else:
+            h, meridiem = int(groups[0]), (groups[1] or "")
+            mi = 0
+        if meridiem == "pm" and h < 12:
+            h += 12
+        elif meridiem == "am" and h == 12:
+            h = 0
+        hour, minute = h, mi
+
+    # Build datetime in client timezone → convert to ET for the calendar
+    try:
+        client_dt = client_tz.localize(datetime(target_date.year, target_date.month, target_date.day, hour, minute))
+        appt_time = client_dt.astimezone(ET)
+    except Exception:
+        appt_time = ET.localize(datetime(target_date.year, target_date.month, target_date.day, hour, minute))
 
     start_time = appt_time.isoformat()
     end_time = (appt_time + timedelta(hours=1)).isoformat()
+
+    logger.info("[GHL] Booking appointment for %s | calendar=%s user=%s | %s (ET) ← %s local",
+                contact_name, calendar_id, assigned_user_id, start_time, tz_name)
 
     body = {
         "calendarId": calendar_id,
@@ -1034,19 +1130,27 @@ async def create_appointment(contact_id: str, contact_name: str, assigned_user_i
         "address": "Phone Call",
     }
     try:
-        return await request_ghl("POST", "/calendars/events/appointments", json=body)
+        result = await request_ghl("POST", "/calendars/events/appointments", json=body)
+        logger.info("[GHL] Appointment created for %s: %s", contact_name, str(result)[:200])
+        return result
     except Exception as e:
         logger.error("[GHL] Error creating appointment for %s: %s", contact_id, e)
         return {}
 
 async def move_to_appointment_booked(contact_id: str) -> bool:
-    """Move contact's opportunity to Appointment Booked stage"""
+    """Move contact's opportunity to Appointment Booked stage."""
     opportunities = await get_contact_opportunities(contact_id)
+    if not opportunities:
+        logger.warning("[GHL] move_to_appointment_booked: no opportunities for %s", contact_id)
+        return False
     moved = False
     for opp in opportunities:
         pipeline_id = opp.get("pipelineId", "")
         stage_id = APPOINTMENT_BOOKED_STAGES.get(pipeline_id)
         if stage_id:
             await update_contact_stage(opp.get("id", ""), stage_id)
+            logger.info("[GHL] Moved opp %s → Appointment Booked (pipeline=%s)", opp.get("id"), pipeline_id)
             moved = True
+        else:
+            logger.warning("[GHL] No Appointment Booked stage mapped for pipeline %s", pipeline_id)
     return moved
