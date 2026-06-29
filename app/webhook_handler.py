@@ -536,21 +536,37 @@ def extract_contact_id(payload: dict) -> str:
     return ""
 
 
+_GHL_WHATSAPP_TYPES = {19, "19", 7, "7", "TYPE_WHATSAPP", "WHATSAPP"}
+_GHL_SMS_TYPES     = {1,  "1",        "TYPE_SMS",      "SMS"}
+
+def _classify_ghl_type(val) -> str:
+    """Map a GHL type value (string or int) to 'SMS', 'WhatsApp', or ''."""
+    if not val and val != 0:
+        return ""
+    val_up = str(val).upper()
+    if "WHATSAPP" in val_up or val in _GHL_WHATSAPP_TYPES:
+        return "WhatsApp"
+    if "SMS" in val_up or val in _GHL_SMS_TYPES:
+        return "SMS"
+    return ""
+
 def extract_channel(payload: dict) -> str:
-    """Extract message channel from payload"""
+    """Extract message channel from payload. Handles GHL string and integer type codes."""
     for key in ("messageType", "channel", "medium"):
-        val = payload.get(key, "")
-        if val and isinstance(val, str) and val.upper() in ("SMS", "WHATSAPP", "EMAIL"):
-            return val.upper()
-    # 'type' field may be int in GHL payloads — skip if not string
-    val = payload.get("type", "")
-    if val and isinstance(val, str) and val.upper() in ("SMS", "WHATSAPP", "EMAIL"):
-        return val.upper()
+        ch = _classify_ghl_type(payload.get(key, ""))
+        if ch:
+            return ch
+    # 'type' may be int (19=WhatsApp, 1=SMS) in GHL payloads
+    ch = _classify_ghl_type(payload.get("type", ""))
+    if ch:
+        return ch
+    # Check nested message object
     msg = payload.get("message", {})
     if isinstance(msg, dict):
-        t = msg.get("type", "") or msg.get("channel", "")
-        if t and isinstance(t, str) and t.upper() in ("SMS", "WHATSAPP", "EMAIL"):
-            return t.upper()
+        for key in ("type", "channel", "messageType"):
+            ch = _classify_ghl_type(msg.get(key, ""))
+            if ch:
+                return ch
     return ""  # unknown — let get_contact_channel() decide via GHL API
 
 
@@ -633,8 +649,8 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
             # Determine channel: use payload first, fall back to GHL API
             # The payload channel is the most accurate since it comes from the inbound event
             payload_channel = extract_channel(payload)
-            if payload_channel in ("SMS", "WHATSAPP", "WhatsApp"):
-                channel = "SMS" if payload_channel == "SMS" else "WhatsApp"
+            if payload_channel in ("SMS", "WhatsApp"):
+                channel = payload_channel
                 print(f"[Webhook] Channel from payload: {channel}")
             else:
                 channel = await get_contact_channel(contact_id)

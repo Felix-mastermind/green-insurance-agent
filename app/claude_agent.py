@@ -163,15 +163,35 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
         await save_conversation_message(contact_id, "assistant", ai_text)
 
         # Detect appointment confirmed
+        import re as _re
         ai_lower = ai_text.lower()
-        appt_confirmed = any(kw in ai_lower for kw in ["listo!", "listo,", "agendad", "confirmad", "te va a llamar", "se va a comunicar"])
-        day_mentioned = any(w in msg_lower for w in ["lunes","martes","miercoles","jueves","viernes","sabado","monday","tuesday","wednesday","thursday","friday","saturday","tomorrow","manana","mañana"])
+        appt_confirmed = any(kw in ai_lower for kw in [
+            "listo!", "listo,", "agendad", "confirmad",
+            "te va a llamar", "se va a comunicar",
+            "programada", "programado", "quedo programada", "quedó programada",
+            "tu cita quedo", "tu cita quedó", "cita para", "cita quedo",
+        ])
+        # Time present in AI response (e.g. "9:00 AM", "2 PM")
+        has_time_in_ai = bool(_re.search(r'\d{1,2}:\d{2}|\d{1,2}\s*(am|pm)', ai_lower))
+
+        _day_words = [
+            "lunes","martes","miercoles","miércoles","jueves","viernes",
+            "sabado","sábado","monday","tuesday","wednesday","thursday",
+            "friday","saturday","tomorrow","manana","mañana","hoy","today",
+        ]
+        day_in_msg = any(w in msg_lower for w in _day_words)
+        day_in_ai  = any(w in ai_lower for w in _day_words)
+        # Also check recent history — client may have said "mañana" a message earlier
+        day_in_history = False
+        if not day_in_msg and history:
+            _hist_text = " ".join(m.get("content","") for m in history[-4:]).lower()
+            day_in_history = any(w in _hist_text for w in _day_words)
 
         intent = "general"
         preferred_time = ""
-        if appt_confirmed and day_mentioned:
+        if appt_confirmed and (has_time_in_ai or day_in_msg or day_in_history or day_in_ai):
             intent = "wants_appointment"
-            preferred_time = user_message
+            preferred_time = ai_text  # full confirmation has day + time
 
         return {"response": ai_text, "should_transfer": False, "intent": intent, "preferred_time": preferred_time}
 
