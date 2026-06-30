@@ -130,16 +130,21 @@ async def is_new_lead_stage(contact_id: str) -> bool:
     return False
 
 
-_CLOSED_STAGES = {
+# Stages where the bot must stay completely silent (exact or substring match)
+_CLOSED_STAGES_EXACT = {
     "not eligible", "not interested", "not insterested", "dnd",
     "wrong number", "offer not accepted", "reject", "won",
+    "follow up to close", "quoted", "appointment booked",
+    "already insured", "do not contact",
 }
+# Substring fragments — if stage name contains any of these, bot stays silent
+_CLOSED_STAGES_CONTAINS = [
+    "not interested", "follow up", "quoted", "appointment", "closed",
+    "do not", "already insured", "no interest",
+]
 
 async def is_opportunity_closed(contact_id: str) -> bool:
-    """
-    Returns True if the contact's opportunity is marked lost/won or is in a terminal stage.
-    Used to prevent bot from replying after an advisor has closed/rejected a lead.
-    """
+    """Returns True if the contact's opportunity is in a terminal or advisor-only stage."""
     opportunities = await get_contact_opportunities(contact_id)
     for opp in opportunities:
         status = (opp.get("status") or "").lower()
@@ -153,7 +158,10 @@ async def is_opportunity_closed(contact_id: str) -> bool:
         )
         if not stage_name:
             stage_name = opp.get("stageName", "") or ""
-        if stage_name.lower() in _CLOSED_STAGES:
+        sn = stage_name.lower()
+        if sn in _CLOSED_STAGES_EXACT:
+            return True
+        if any(frag in sn for frag in _CLOSED_STAGES_CONTAINS):
             return True
     return False
 
