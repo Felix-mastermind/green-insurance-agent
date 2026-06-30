@@ -394,27 +394,19 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
 
     intent = ai_result.get("intent", "")
 
-    # ── Single intent chain — only ONE branch fires ──────────────────────────
-    if intent == "wants_call":
-        assigned_uid = assigned_user_id or await get_opportunity_assigned_user(contact_id)
-        await notify_advisor_call_requested(contact_id, contact_name, assigned_uid, product)
-        await move_to_hot_lead(contact_id)
-        await add_contact_tag(contact_id, "bot-pausado")
-        _cancel_job(f"bot_reply_{contact_id}")
-        print(f"[Webhook] {contact_name} wants call — HOT Lead + advisor notified + bot pausado")
-
-    elif intent == "wants_appointment":
+    # ── ÚNICO intent activo: agendar cita ────────────────────────────────────
+    if intent == "wants_appointment":
         preferred_time = ai_result.get("preferred_time", "")
         _time_indicators = [
             "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes",
-            "mañana", "manana", "pasado", "monday", "tuesday", "wednesday",
+            "mañana", "manana", "monday", "tuesday", "wednesday",
             "thursday", "friday", "saturday", "tomorrow", "am", "pm", ":",
         ]
         _has_time = any(w in preferred_time.lower() for w in _time_indicators)
         if not _has_time:
-            print(f"[Webhook] {contact_name} wants appointment but no day/time yet — waiting for client to specify")
+            print(f"[Webhook] {contact_name} — esperando dia/hora del cliente")
         else:
-            # assigned_uid: payload → opportunity → contact owner
+            # assigned_uid: payload → oportunidad → owner del contacto
             assigned_uid = (assigned_user_id
                             or await get_opportunity_assigned_user(contact_id)
                             or (_contact_data or {}).get("assignedTo", ""))
@@ -424,90 +416,25 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
                        or (appt.get("appointment") or {}).get("id", ""))
             if appt_id:
                 await move_to_appointment_booked(contact_id)
-                contact_info = await get_contact(contact_id)
-                phone = (contact_info or {}).get("phone", "") or ""
-                phone_str = " | Tel: " + phone if phone else ""
-                product_str = " | Seguro: " + product if product else ""
-                if False:
-                    pass  # bot never runs during business hours
-                else:
-                    reminder_time = next_business_opening()
-                    job_id = f"reminder_{contact_id}_{int(reminder_time.timestamp())}"
-                    scheduler.add_job(
-                        send_advisor_next_day_reminder,
-                        "date",
-                        run_date=reminder_time,
-                        id=job_id,
-                        replace_existing=True,
-                        args=[contact_id, assigned_uid, contact_name, preferred_time, product or ""],
-                    )
-                    print(f"[Webhook] {contact_name} appointment booked (out of hours) — reminder at {reminder_time.strftime('%Y-%m-%d %I:%M %p ET')}")
+                reminder_time = next_business_opening()
+                scheduler.add_job(
+                    send_advisor_next_day_reminder,
+                    "date",
+                    run_date=reminder_time,
+                    id=f"reminder_{contact_id}_{int(reminder_time.timestamp())}",
+                    replace_existing=True,
+                    args=[contact_id, assigned_uid, contact_name, preferred_time, product or ""],
+                )
+                print(f"[Webhook] {contact_name} — cita creada, stage=Appointment Booked, reminder {reminder_time.strftime('%Y-%m-%d %I:%M %p ET')}")
+            else:
+                print(f"[Webhook] {contact_name} — GHL no confirmó la cita: {str(appt)[:200]}")
 
-                # Appointment confirmed — bot stops here
-                await add_contact_tag(contact_id, "bot-pausado")
-                _cancel_job(f"bot_reply_{contact_id}")
-                print(f"[Webhook] {contact_name} — bot-pausado added after appointment booking")
-
-    elif intent == "wrong_number":
-        await move_to_wrong_number(contact_id)
-        contact_data = await get_contact(contact_id)
-        email = (contact_data or {}).get("email", "")
-        if email and is_valid_email(email):
-            subject = "Green Insurance - Verificacion de contacto"
-            body = f"Hola, recibimos un mensaje indicando que este numero no corresponde a {contact_name}. Si esto es un error, por favor contactenos. Green Insurance - Marietta, GA"
-            await send_email(contact_id, subject, body)
-            print(f"[Webhook] Wrong number for {contact_name} — moved, email sent to {email}")
-        else:
-            print(f"[Webhook] Wrong number for {contact_name} — moved, no valid email")
-
-    elif intent == "already_insured":
-        await move_to_already_insured(contact_id)
-        print(f"[Webhook] Already insured: {contact_name} — moved to Already Insured stage")
-
-    elif intent == "cross_sell":
-        target_product = ai_result.get("preferred_time", "")
-        pipeline_info = CROSS_SELL_PIPELINES.get(target_product)
-        if pipeline_info:
-            new_pipeline_id, new_stage_id = pipeline_info
-            contact_info = await get_contact(contact_id)
-            phone = (contact_info or {}).get("phone", "") or ""
-            phone_str = " | Tel: " + phone if phone else ""
-            opp_title = f"{contact_name} - {target_product.title()}"
-            new_opp = await create_opportunity(contact_id, new_pipeline_id, new_stage_id, opp_title)
-            opp_id = (new_opp.get("opportunity") or new_opp).get("id", "")
-            notify_msg = (
-                f"🔄 Cross-sell: {contact_name}{phone_str} estaba en pipeline '{product}' "
-                f"y ahora quiere cotizar '{target_product}'. "
-                f"Nueva oportunidad creada{' (ID: ' + opp_id + ')' if opp_id else ''}."
-            )
-            await send_sms(BARBARA_CONTACT_ID, notify_msg)
-            print(f"[Webhook] Cross-sell {contact_name}: {product} → {target_product} | opp={opp_id}")
-        else:
-            print(f"[Webhook] Cross-sell detected but no pipeline found for '{target_product}'")
-
-    elif intent == "not_interested":
-        await move_to_not_interested(contact_id)
-        print(f"[Webhook] Not interested: {contact_name} — moved to Not Interested stage")
-
-    elif should_transfer:
-        # Don't re-send transfer message if lead is already in a handled stage
-        from app.ghl_client import get_contact_opportunities as _get_opps
-        _opps = await _get_opps(contact_id)
-        _current_stage = ""
-        for _opp in _opps:
-            _ps = _opp.get("pipelineStage") or {}
-            _current_stage = (_ps.get("name", "").lower() if isinstance(_ps, dict) else "")
-            if _current_stage:
-                break
-        _skip = {"appointment booked", "hot lead", "hot leads", "cita agendada", "quoted"}
-        if any(s in _current_stage for s in _skip):
-            print(f"[Webhook] Transfer skipped — {contact_name} already in stage '{_current_stage}'")
-        else:
-            moved = await move_to_hot_lead(contact_id)
-            await add_contact_tag(contact_id, "llamar-manana")
+            # Bot para aquí siempre que haya dado una hora, creada o no
             await add_contact_tag(contact_id, "bot-pausado")
             _cancel_job(f"bot_reply_{contact_id}")
-            print(f"[Webhook] Transfer for {contact_name} — HOT Lead + bot pausado")
+            print(f"[Webhook] {contact_name} — bot-pausado")
+    else:
+        print(f"[Webhook] {contact_name} — intent={intent}, conversacion en curso (sin accion extra)")
 
 def extract_message_body(payload: dict) -> str:
     """Extract message text from various GHL payload formats"""

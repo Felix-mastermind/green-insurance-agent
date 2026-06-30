@@ -107,26 +107,6 @@ async def get_ai_response(contact_id: str, user_message: str, contact_name: str 
     history = await get_conversation_history(contact_id, limit=6)
     msg_lower = user_message.lower()
 
-    # Wrong number — short circuit
-    if any(kw in msg_lower for kw in ["numero equivocado", "wrong number", "equivocado", "not my number", "no soy"]):
-        reply = "Entiendo, disculpa la molestia."
-        await save_conversation_message(contact_id, "user", user_message)
-        await save_conversation_message(contact_id, "assistant", reply)
-        return {"response": reply, "should_transfer": False, "intent": "wrong_number", "preferred_time": ""}
-
-    # Not interested / opt-out — short circuit
-    not_interested_kw = [
-        "no me interesa", "no estoy interesado", "no gracias", "no necesito", "no quiero",
-        "not interested", "no thank you", "no thanks", "dont need", "don't need",
-        "no molesten", "ya no molesten", "no me molesten", "dejen de", "no me escriban",
-        "stop", "unsubscribe", "remove me", "do not contact",
-    ]
-    if any(kw in msg_lower for kw in not_interested_kw):
-        reply = "Entendido, gracias. Si en algun momento lo necesitas aqui estamos."
-        await save_conversation_message(contact_id, "user", user_message)
-        await save_conversation_message(contact_id, "assistant", reply)
-        return {"response": reply, "should_transfer": False, "intent": "not_interested", "preferred_time": ""}
-
     name_hint = contact_name.split()[0] if contact_name else ""
     system_prompt = SYSTEM_PROMPT_BASE
 
