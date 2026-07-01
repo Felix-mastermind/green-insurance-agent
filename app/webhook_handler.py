@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, BackgroundTasks
 from app.claude_agent import get_ai_response
 from app.scheduler import scheduler, ET
-from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, create_task, move_to_hot_lead, human_agent_active, get_contact_channel, move_to_wrong_number, move_to_not_interested, move_to_already_insured, send_email, is_valid_email, get_opportunity_assigned_user, notify_advisor_call_requested, create_appointment, move_to_appointment_booked, create_opportunity, CROSS_SELL_PIPELINES, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities, is_bot_paused, add_bot_stamp, notify_mastermind_staff, get_notification_recipients, PIPELINE_AUTO_MASTERMIND
-from app.supabase_client import log_message, save_conversation_message, check_survey_pending, mark_survey_answered, log_survey_sent
+from app.ghl_client import send_sms, send_whatsapp, get_contact, get_latest_inbound_message, add_contact_tag, add_internal_note, human_agent_active, get_contact_channel, get_opportunity_assigned_user, create_appointment, move_to_appointment_booked, BARBARA_CONTACT_ID, get_contact_pipeline, get_contact_opportunities, is_bot_paused, add_bot_stamp, notify_mastermind_staff, get_notification_recipients, PIPELINE_AUTO_MASTERMIND
+from app.supabase_client import log_message, save_conversation_message
 
 router = APIRouter()
 
@@ -21,7 +21,6 @@ AGENTS = {
 }
 
 BARBARA_CONTACT_ID = "Fr2WbOMJcsnKPC01S0Dz"
-REVIEW_LINK = "https://share.google/07auFx6a4aT7D7ht6"
 
 BUSINESS_HOURS_START         = 11  # 11:00 AM ET — todos los días hábiles
 BUSINESS_HOURS_END_WEEKDAY   = 19  # 7:00 PM ET — Lunes a Viernes
@@ -166,66 +165,6 @@ async def is_opportunity_closed(contact_id: str) -> bool:
     return False
 
 
-async def _send_won_survey(contact_id: str, contact_name: str):
-    """Send review survey when an opportunity is marked as Won. Logs as pending so the bot can handle the response."""
-    already_pending = await check_survey_pending(contact_id)
-    if already_pending:
-        print(f"[Survey] Survey already pending for {contact_name} ({contact_id}) — skipping")
-        return
-    contact_data = await get_contact(contact_id)
-    if not contact_data:
-        return
-    first_name = contact_data.get("firstName", "") or contact_name or "cliente"
-    lang = "en" if "english" in [str(t).lower() for t in (contact_data.get("tags") or [])] else "es"
-    if lang == "en":
-        msg = (
-            f"Hi {first_name}! Thank you for choosing Green Insurance 💚 "
-            f"How would you rate our service?\n\n"
-            f"Reply with a number:\n"
-            f"1️⃣ Poor\n2️⃣ Fair\n3️⃣ Good\n4️⃣ Very good\n5️⃣ Excellent"
-        )
-    else:
-        msg = (
-            f"Hola {first_name}! Gracias por elegir Green Insurance 💚 "
-            f"¿Cómo te pareció nuestro servicio?\n\n"
-            f"Responde con un número:\n"
-            f"1️⃣ Malo\n2️⃣ Regular\n3️⃣ Bueno\n4️⃣ Muy bueno\n5️⃣ Excelente"
-        )
-    channel = await get_contact_channel(contact_id)
-    if channel == "SMS":
-        await send_sms(contact_id, msg)
-    else:
-        await send_whatsapp(contact_id, msg)
-    await log_survey_sent(contact_id, first_name)
-    print(f"[Survey] Won survey sent to {first_name} ({contact_id})")
-
-
-async def handle_survey_response(contact_id: str, contact_name: str, score: int, channel: str):
-    """Handle a 1-5 survey response from a Won contact"""
-    await mark_survey_answered(contact_id)
-    if score >= 3:
-        stars = "⭐" * score
-        msg = (f"Hola {contact_name}! Gracias por tu calificación {stars} "
-               f"¡Nos alegra mucho saberlo! Si puedes dejarnos una reseña rápida "
-               f"te lo agradecemos mucho: {REVIEW_LINK}")
-        if channel == "SMS":
-            await send_sms(contact_id, msg)
-        else:
-            await send_whatsapp(contact_id, msg)
-        print(f"[Survey] ✅ {contact_name} calificó {score}/5 — se envió link de reseña")
-    else:
-        msg = (f"Hola {contact_name}, lamentamos que tu experiencia no haya sido la mejor. "
-               f"¿Podrías contarnos qué podemos mejorar? "
-               f"Un asesor se comunicará contigo pronto.")
-        if channel == "SMS":
-            await send_sms(contact_id, msg)
-        else:
-            await send_whatsapp(contact_id, msg)
-        barbara_msg = (f"⚠️ Alerta: El cliente {contact_name} calificó el servicio con {score}/5. "
-                       f"Por favor verifica el caso.")
-        await send_sms(BARBARA_CONTACT_ID, barbara_msg)
-        print(f"[Survey] ⚠️ {contact_name} calificó {score}/5 — mensaje de feedback + tarea a Barbara")
-
 def _cancel_job(job_id: str) -> None:
     """Silently cancel a scheduled job if it exists."""
     try:
@@ -233,33 +172,6 @@ def _cancel_job(job_id: str) -> None:
         print(f"[Scheduler] Cancelled job {job_id}")
     except Exception:
         pass  # Job didn't exist — that's fine
-
-
-async def notify_advisor_no_reply(contact_id: str, contact_name: str, product: str, assigned_uid: str) -> None:
-    """Notify advisor when client hasn't replied to bot message within 5 minutes.
-    Posts an internal Activity note on the LEAD's conversation so the advisor sees it
-    in context — avoids SMS routing to wrong conversations.
-    """
-    ghl_link = f"https://app.gohighlevel.com/contacts/{contact_id}"
-    product_str = f" | Seguro: {product}" if product else ""
-
-    # Internal note on the LEAD's conversation (advisor sees it in context)
-    note_text = (
-        f"⏰ SIN RESPUESTA — {contact_name}{product_str} no ha respondido el mensaje del bot "
-        f"en los ultimos 5 min. Considera hacer seguimiento manual. {ghl_link}"
-    )
-    await add_internal_note(contact_id, note_text)
-
-    alert_msg = (
-        f"⏰ Sin respuesta: {contact_name}{product_str} no ha respondido el mensaje del bot "
-        f"en los ultimos 5 min. Considera hacer seguimiento manual: {ghl_link}"
-    )
-    pipeline_id = await get_notification_recipients(contact_id, assigned_uid)
-    if pipeline_id == PIPELINE_AUTO_MASTERMIND:
-        await notify_mastermind_staff(contact_id, alert_msg, assigned_uid)
-    else:
-        await send_sms(BARBARA_CONTACT_ID, alert_msg)
-    print(f"[Scheduler] No-reply notification sent for {contact_name}")
 
 
 async def process_inbound_message(contact_id: str, message: str, channel: str, contact_name: str, assigned_user_id: str = ""):
@@ -316,48 +228,13 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
         print(f"[Webhook] SKIPPED — advisor active, bot-pausado added for {contact_name}")
         return
 
-    # Survey responses take priority — won contacts can still reply to the review survey
-    msg_stripped = message.strip()
-    _SURVEY_TEXT_MAP = {
-        "malo": 1, "bad": 1, "poor": 1,
-        "regular": 2, "fair": 2,
-        "bueno": 3, "bien": 3, "good": 3,
-        "muy bueno": 4, "very good": 4, "muy bien": 4,
-        "excelente": 5, "excellent": 5, "perfecto": 5, "5 estrellas": 5,
-    }
-    _survey_score = None
-    if msg_stripped in ("1", "2", "3", "4", "5"):
-        _survey_score = int(msg_stripped)
-    else:
-        _survey_score = _SURVEY_TEXT_MAP.get(msg_stripped.lower())
-    if _survey_score and await check_survey_pending(contact_id):
-        await handle_survey_response(contact_id, contact_name, _survey_score, channel)
-        return
-
     # Re-check: if the opportunity was closed/lost/won while we were waiting, stay silent
     if await is_opportunity_closed(contact_id):
         await add_contact_tag(contact_id, "bot-pausado")
         print(f"[Webhook] SKIPPED — opportunity closed/lost, bot-pausado added for {contact_name}")
         return
 
-    # Handle opt-out — English exact match + Spanish substring detection
-    _msg_lc = msg_stripped.lower().strip()
-    _optout_exact = {"stop", "unsubscribe", "cancel", "optout", "opt out",
-                     "remove me", "stop messages", "do not contact"}
-    _optout_contains = [
-        "no molesten", "no me molest", "no me contact", "dejen de",
-        "no quiero mensajes", "no me manden", "borrenme", "bórrenme",
-        "ya no me escriban", "no me escriban", "no me llamen",
-        "stop contacting", "do not contact", "remove me",
-    ]
-    _is_optout = _msg_lc in _optout_exact or any(kw in _msg_lc for kw in _optout_contains)
-    if _is_optout:
-        await move_to_not_interested(contact_id)
-        await add_contact_tag(contact_id, "bot-pausado")
-        print(f"[Webhook] OPT-OUT '{msg_stripped}' from {contact_name} — moved to Not Interested + bot-pausado")
-        return  # No reply
-
-    # Pre-fetch pipeline (product info for intent logging)
+    # Pre-fetch pipeline (product info for appointment confirmation message)
     _, product = await get_contact_pipeline(contact_id)
 
     # Get AI response — always outside business hours here (checked above)
@@ -378,19 +255,6 @@ async def process_inbound_message(contact_id: str, message: str, channel: str, c
 
     # Activity stamp so advisors can distinguish bot messages from human ones in GHL
     await add_bot_stamp(contact_id)
-
-    # Schedule advisor notification if client doesn't reply in 5 minutes
-    assigned_uid_for_notify = assigned_user_id or await get_opportunity_assigned_user(contact_id)
-    notify_at = datetime.now(ET) + timedelta(minutes=5)
-    scheduler.add_job(
-        notify_advisor_no_reply,
-        "date",
-        run_date=notify_at,
-        id=f"no_reply_{contact_id}",
-        replace_existing=True,
-        args=[contact_id, contact_name, product, assigned_uid_for_notify],
-    )
-    print(f"[Scheduler] No-reply notification set for {contact_name} at {notify_at.strftime('%I:%M %p ET')}")
 
     intent = ai_result.get("intent", "")
 
@@ -627,31 +491,6 @@ async def ghl_webhook(request: Request, background_tasks: BackgroundTasks):
                     print(f"[Webhook] Response scheduled in 5 min for {contact_name or contact_id} at {run_at.strftime('%I:%M %p ET')}")
             else:
                 print(f"[Webhook] No message found for {contact_id} — skipping")
-
-        # New contact/lead created
-        elif event_type in ("ContactCreate", "ContactCreated", "contact_created"):
-            first_name = payload.get("firstName", "")
-            print(f"[Webhook] New contact: {first_name} ({contact_id})")
-
-        # Opportunity stage changed
-        elif event_type in ("OpportunityStageUpdate", "opportunity_stage_update"):
-            stage = payload.get("stage", {})
-            stage_name = stage.get("name", "") if isinstance(stage, dict) else str(stage)
-            status = (payload.get("status") or "").lower()
-            print(f"[Webhook] Stage updated for {contact_id}: {stage_name} | status: {status}")
-            if (stage_name.lower() == "won" or status == "won") and contact_id:
-                await _send_won_survey(contact_id, contact_name)
-
-        # Opportunity marked as Won → send review survey
-        elif event_type in ("OpportunityStatusUpdate", "opportunity_status_update"):
-            status = (payload.get("status") or "").lower()
-            opp_data = payload.get("opportunity") or {}
-            if not status:
-                status = (opp_data.get("status") or "").lower()
-            if not contact_id:
-                contact_id = opp_data.get("contactId", "")
-            if status == "won" and contact_id:
-                await _send_won_survey(contact_id, contact_name)
 
         return {"status": "ok", "event": event_type or "inbound_message"}
 
