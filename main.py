@@ -13,8 +13,7 @@ from app.scheduler import scheduler, ET
 
 from app.webhook_handler import router as webhook_router
 from app.supervisor import router as supervisor_router
-from app.renewal_reminders import run_renewal_reminders
-from app.follow_ups import run_follow_ups
+# follow_ups y renewal_reminders desactivados — bot solo agenda citas
 from app.ghl_client import (
     GHLIntegrationError,
     get_conversations,
@@ -84,15 +83,13 @@ async def root():
 
 @app.post("/run/follow-ups")
 async def trigger_follow_ups():
-    """Manually trigger follow-ups"""
-    result = await run_follow_ups()
-    return result
+    """Desactivado — bot solo agenda citas."""
+    return {"status": "disabled", "message": "Follow-ups desactivados. El bot solo agenda citas."}
 
 @app.post("/run/renewal-reminders")
 async def trigger_renewal_reminders():
-    """Manually trigger renewal reminders (for testing)"""
-    result = await run_renewal_reminders()
-    return result
+    """Desactivado — bot solo agenda citas."""
+    return {"status": "disabled", "message": "Renewal reminders desactivados."}
 
 @app.get("/health/ghl")
 async def ghl_health_check():
